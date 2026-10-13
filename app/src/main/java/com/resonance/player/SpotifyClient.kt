@@ -24,11 +24,12 @@ import java.util.Base64
  * Spotify playback commands require an authorized Spotify Connect device.
  * This client cannot return Spotify song audio bytes.
  */
-data class SpotifyPlaylist(val id: String, val name: String, val editable: Boolean)
+data class SpotifyPlaylist(val id: String, val name: String, val editable: Boolean, val cover: String = "")
 
 data class SpotifyTrack(
     val uri: String, val title: String, val artist: String, val local: Boolean,
-    val durationSeconds: Int = 0
+    val durationSeconds: Int = 0,
+    val cover: String = ""
 )
 
 class SpotifyClient(private val activity: Activity) {
@@ -71,7 +72,7 @@ class SpotifyClient(private val activity: Activity) {
                         MessageDigest.getInstance("SHA-256").digest(secret.toByteArray(Charsets.US_ASCII))
                     )
                     val scope = "user-read-private user-read-email playlist-read-private " +
-                        "playlist-read-collaborative user-library-read user-read-playback-state " +
+                        "playlist-read-collaborative user-library-read user-library-modify user-read-playback-state " +
                         "user-modify-playback-state playlist-modify-public playlist-modify-private streaming"
                     val authUrl = "https://accounts.spotify.com/authorize?" + form(mapOf(
                         "client_id" to id, "response_type" to "code", "redirect_uri" to CALLBACK,
@@ -137,6 +138,7 @@ class SpotifyClient(private val activity: Activity) {
     fun get(path: String): JSONObject = api("GET", path)
     fun put(path: String, body: JSONObject? = null) = api("PUT", path, body)
     fun post(path: String, body: JSONObject? = null) = api("POST", path, body)
+    fun delete(path: String) = api("DELETE", path)
 
     /**
      * Stable, pseudoanonymous account ID prevents sidecars being shown under the wrong account.
@@ -166,7 +168,8 @@ class SpotifyClient(private val activity: Activity) {
                 if (id.isBlank()) continue
                 val owner = p.optJSONObject("owner")?.optString("id") ?: ""
                 val editable = owner == self || p.optBoolean("collaborative")
-                results += SpotifyPlaylist(id, p.optString("name").ifBlank { "Adsız liste" }, editable)
+                results += SpotifyPlaylist(id, p.optString("name").ifBlank { "Adsız liste" },
+                    editable, p.optJSONArray("images")?.optJSONObject(0)?.optString("url").orEmpty())
             }
             if (arr.length() < 50) break
             offset += arr.length()
@@ -189,7 +192,9 @@ class SpotifyClient(private val activity: Activity) {
                 val uri = track.optString("uri")
                 val isLocal = item.optBoolean("is_local") || track.optBoolean("is_local")
                 result += SpotifyTrack(uri, track.optString("name").ifBlank { "Adsız şarkı" },
-                    artist, isLocal, track.optInt("duration_ms") / 1000)
+                    artist, isLocal, track.optInt("duration_ms") / 1000,
+                    track.optJSONObject("album")?.optJSONArray("images")?.optJSONObject(0)
+                        ?.optString("url").orEmpty())
             }
             if (arr.length() < 50) break
             offset += arr.length()
@@ -211,7 +216,50 @@ class SpotifyClient(private val activity: Activity) {
         val result = post("/me/playlists", JSONObject().put("name", title).put("public", false)
             .put("description", "Resonance ile oluşturuldu"))
         val id = result.getString("id")
-        return SpotifyPlaylist(id, result.optString("name", title), true)
+        return SpotifyPlaylist(id, result.optString("name", title), true,
+            result.optJSONArray("images")?.optJSONObject(0)?.optString("url").orEmpty())
+    }
+
+
+    /** Official Spotify liked tracks; use pagination for large libraries. */
+    fun savedTracks(offset: Int = 0, limit: Int = 50): List<SpotifyTrack> {
+        require(offset >= 0 && limit in 1..50)
+        val data = get("/me/tracks?limit=$limit&offset=$offset")
+        val items = data.optJSONArray("items") ?: JSONArray()
+        return (0 until items.length()).mapNotNull { index ->
+            val entry = items.optJSONObject(index) ?: return@mapNotNull null
+            val track = entry.optJSONObject("track") ?: return@mapNotNull null
+            val uri = track.optString("uri")
+            if (!uri.startsWith("spotify:track:")) return@mapNotNull null
+            SpotifyTrack(
+                uri, track.optString("name"), track.optJSONArray("artists")
+                    ?.optJSONObject(0)?.optString("name").orEmpty(),
+                false, track.optInt("duration_ms") / 1000,
+                track.optJSONObject("album")?.optJSONArray("images")
+                    ?.optJSONObject(0)?.optString("url").orEmpty()
+            )
+        }
+    }
+
+    /** Spotify 2026 generic library endpoints, batched to at most 40 URIs. */
+    fun checkSavedTracks(uris: List<String>): Set<String> {
+        val valid = uris.distinct().filter { it.startsWith("spotify:track:") }
+        val liked = mutableSetOf<String>()
+        for (batch in valid.chunked(40)) {
+            val response = get("/me/library/contains?uris=" +
+                Uri.encode(batch.joinToString(",")))
+            val states = response.optJSONArray("items") ?: JSONArray()
+            batch.forEachIndexed { i, uri ->
+                if (states.optBoolean(i)) liked += uri
+            }
+        }
+        return liked
+    }
+
+    fun setSavedTrack(uri: String, saved: Boolean) {
+        require(uri.matches(Regex("spotify:track:[A-Za-z0-9]+")))
+        val path = "/me/library?uris=" + Uri.encode(uri)
+        if (saved) put(path) else delete(path)
     }
 
     private fun api(method: String, path: String, body: JSONObject? = null): JSONObject {
@@ -231,7 +279,11 @@ class SpotifyClient(private val activity: Activity) {
             val raw = (if (status in 200..299) c.inputStream else c.errorStream)
                 ?.bufferedReader()?.use { it.readText() } ?: ""
             if (status !in 200..299) error("Spotify API HTTP $status: ${raw.take(260)}")
-            return if (raw.isBlank()) JSONObject() else JSONObject(raw)
+            return when {
+                raw.isBlank() -> JSONObject()
+                raw.trimStart().startsWith("[") -> JSONObject().put("items", JSONArray(raw))
+                else -> JSONObject(raw)
+            }
         } finally { c.disconnect() }
     }
 

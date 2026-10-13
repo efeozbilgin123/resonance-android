@@ -112,6 +112,36 @@ object YouTubeMusicProvider {
         return recordings.distinctBy { it.videoId }.take(35)
     }
 
+
+    /**
+     * Separate ordinary YouTube video search. The Music Songs results are not
+     * comprehensive: users must be able to find independent uploads too.
+     * Playback still resolves audio on demand and may fail for restricted videos.
+     */
+    fun searchVideos(query: String): List<Recording> {
+        require(query.length in 2..180) { "Arama 2–180 karakter olmalı" }
+        initialize()
+        val extractor = ServiceList.YouTube.getSearchExtractor(
+            query, listOf(YoutubeSearchQueryHandlerFactory.VIDEOS), ""
+        )
+        extractor.fetchPage()
+        return extractor.initialPage.items.filterIsInstance<StreamInfoItem>()
+            .mapNotNull { item ->
+                val id = YouTubeLinks.parse(item.url) ?: return@mapNotNull null
+                if (!VIDEO_ID.matches(id)) return@mapNotNull null
+                Recording(
+                    videoId = id,
+                    title = item.name.ifBlank { "Adsız YouTube videosu" },
+                    artist = item.uploaderName.ifBlank { "YouTube" },
+                    durationSeconds = item.duration.coerceAtLeast(0L)
+                        .coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                    artwork = item.thumbnails.firstOrNull()?.url
+                        ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg",
+                    musicLikelihood = 0.5
+                )
+            }.distinctBy { it.videoId }.take(35)
+    }
+
     data class StreamLocation(val url: String, val mimeType: String)
 
     /** Resolve on each media open, since YouTube's signed CDN URLs expire. */

@@ -3,6 +3,8 @@ package com.resonance.player
 import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -54,15 +56,22 @@ fun UnifiedSearchScreen(
         UnifiedMusicCatalog(activity, SpotifyClient(activity))
     }
     val youtubeProvider = remember(activity) { YouTubeAudioProvider(activity) }
+    val spotifyClient = remember(activity) { SpotifyClient(activity) }
+    val favorites = remember(activity) { ResonanceLikesStore(activity) }
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("Tümü") }
     var spotify by remember { mutableStateOf<List<UnifiedSong>>(emptyList()) }
     var youtube by remember { mutableStateOf<List<UnifiedSong>>(emptyList()) }
+    var youtubeVideos by remember { mutableStateOf<List<UnifiedSong>>(emptyList()) }
+    var savedSpotifyUris by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var localLikedKeys by remember { mutableStateOf(favorites.keys()) }
+    var likeError by remember { mutableStateOf("") }
     var audius by remember { mutableStateOf<List<UnifiedSong>>(emptyList()) }
     var errors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var spotifyLoading by remember { mutableStateOf(false) }
     var youtubeLoading by remember { mutableStateOf(false) }
+    var youtubeVideoLoading by remember { mutableStateOf(false) }
     var audiusLoading by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var customServer by remember { mutableStateOf(youtubeProvider.preferredServer) }
@@ -91,18 +100,21 @@ fun UnifiedSearchScreen(
     LaunchedEffect(query, refresh) {
         spotify = emptyList()
         youtube = emptyList()
+        youtubeVideos = emptyList()
         audius = emptyList()
         errors = emptyMap()
         val q = query.trim()
         if (q.length < 2) {
             spotifyLoading = false
             youtubeLoading = false
+            youtubeVideoLoading = false
             audiusLoading = false
             return@LaunchedEffect
         }
         delay(380)
         spotifyLoading = true
         youtubeLoading = true
+        youtubeVideoLoading = true
         audiusLoading = true
         launch {
             try { spotify = withContext(Dispatchers.IO) { catalog.searchSpotify(q) } }
@@ -118,6 +130,15 @@ fun UnifiedSearchScreen(
             } finally { youtubeLoading = false }
         }
         launch {
+            try {
+                youtubeVideos = withContext(Dispatchers.IO) {
+                    catalog.searchYouTubeVideos(q)
+                }
+            } catch (e: Exception) {
+                errors = errors + ("YouTube" to (e.localizedMessage ?: "Video arama hatası"))
+            } finally { youtubeVideoLoading = false }
+        }
+        launch {
             try { audius = withContext(Dispatchers.IO) { catalog.searchAudius(q) } }
             catch (e: Exception) {
                 errors = errors + ("Audius" to (e.localizedMessage ?: "Arama hatası"))
@@ -125,13 +146,25 @@ fun UnifiedSearchScreen(
         }
     }
 
-    val all = remember(query, spotify, youtube, audius) {
-        MusicRelevance.rank(query, spotify + youtube + audius)
+    LaunchedEffect(spotify) {
+        if (!spotifyClient.authorized || spotify.isEmpty()) {
+            savedSpotifyUris = emptySet()
+        } else try {
+            savedSpotifyUris = withContext(Dispatchers.IO) {
+                spotifyClient.checkSavedTracks(spotify.map { it.id })
+            }
+        } catch (_: Exception) {
+            savedSpotifyUris = emptySet()
+        }
     }
-    val filtered = remember(all, filter) {
+    val all = remember(query, spotify, youtube, youtubeVideos, audius) {
+        MusicRelevance.rank(query, spotify + youtube + youtubeVideos + audius)
+    }
+    val filtered = remember(all, filter, youtube, youtubeVideos, query) {
         when (filter) {
             "Spotify" -> all.filter { it.source == MusicOrigin.SPOTIFY }
-            "YouTube Music" -> all.filter { it.source == MusicOrigin.YOUTUBE_MUSIC }
+            "YouTube Music" -> MusicRelevance.rank(query, youtube)
+            "YouTube" -> MusicRelevance.rank(query, youtubeVideos)
             "Audius" -> all.filter { it.source == MusicOrigin.AUDIUS }
             else -> all
         }
@@ -147,7 +180,7 @@ fun UnifiedSearchScreen(
                 Icon(Icons.Rounded.Tune, "YouTube sağlayıcı ayarları", tint = green)
             }
         }
-        Text("Tek arama · Spotify, YouTube Music, Audius",
+        Text("Spotify · YouTube Music · tüm YouTube · Audius",
             modifier = Modifier.padding(start = 17.dp, end = 17.dp, bottom = 8.dp),
             color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(
@@ -163,21 +196,25 @@ fun UnifiedSearchScreen(
             singleLine = true, shape = RoundedCornerShape(16.dp)
         )
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            modifier = Modifier.fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            listOf("Tümü", "Spotify", "YouTube Music", "Audius").forEach { option ->
+            listOf("Tümü", "Spotify", "YouTube Music", "YouTube", "Audius").forEach { option ->
                 FilterChip(selected = filter == option,
                     onClick = { filter = option },
-                    label = { Text(option, style = MaterialTheme.typography.labelSmall) },
-                    modifier = Modifier.weight(
-                        if (option == "YouTube Music") 1.55f else 0.92f
-                    ))
+                    label = { Text(option, style = MaterialTheme.typography.labelSmall) })
             }
         }
 
-        val loading = spotifyLoading || youtubeLoading || audiusLoading
+        val loading = spotifyLoading || youtubeLoading || youtubeVideoLoading || audiusLoading
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (likeError.isNotBlank()) {
+            Text(likeError, color = Color(0xFFFFA6A6),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 18.dp))
+        }
         if (errors.isNotEmpty()) {
             Text(errors.entries.joinToString(" · ") { (provider, why) ->
                 "$provider: $why"
@@ -256,7 +293,10 @@ fun UnifiedSearchScreen(
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(when(track.source) {
-                                    MusicOrigin.YOUTUBE_MUSIC -> "YouTube Music"
+                                    MusicOrigin.YOUTUBE_MUSIC ->
+                                        if (youtubeVideos.any { it.id == track.id } &&
+                                            youtube.none { it.id == track.id }) "YouTube"
+                                        else "YouTube Music"
                                     MusicOrigin.SPOTIFY -> "Spotify · Premium"
                                     MusicOrigin.AUDIUS -> "Audius"
                                     MusicOrigin.LOCAL -> "Yerel"
@@ -270,12 +310,49 @@ fun UnifiedSearchScreen(
                                 }
                             }
                         }
+                        IconButton(onClick = {
+                            if (track.source == MusicOrigin.SPOTIFY) {
+                                if (!spotifyClient.authorized) {
+                                    likeError = "Beğenmek için Spotify hesabını bağla."
+                                } else {
+                                    scope.launch {
+                                        try {
+                                            val old = track.id in savedSpotifyUris
+                                            withContext(Dispatchers.IO) {
+                                                spotifyClient.setSavedTrack(track.id, !old)
+                                            }
+                                            savedSpotifyUris = if (old) savedSpotifyUris - track.id
+                                                else savedSpotifyUris + track.id
+                                            likeError = ""
+                                        } catch (e: Exception) {
+                                            likeError = "Spotify beğenisi: " +
+                                                (e.localizedMessage ?: "İşlem başarısız") +
+                                                " · Gerekirse Spotify izinlerini yenile."
+                                        }
+                                    }
+                                }
+                            } else {
+                                try {
+                                    favorites.toggle(track)
+                                    localLikedKeys = favorites.keys()
+                                    likeError = ""
+                                } catch (e: Exception) {
+                                    likeError = e.localizedMessage ?: "Beğeni kaydedilemedi"
+                                }
+                            }
+                        }) {
+                            val isLiked = if (track.source == MusicOrigin.SPOTIFY)
+                                track.id in savedSpotifyUris else
+                                track.stableKey in localLikedKeys
+                            Icon(if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                if (isLiked) "Beğeniyi kaldır" else "Beğen",
+                                tint = if (isLiked) Color(0xFFFF799C) else Color.LightGray)
+                        }
                         IconButton(onClick = { onAdd(track) }) {
                             Icon(Icons.Rounded.PlaylistAdd,
                                 "Resonance / Spotify listesine ekle",
                                 tint = green)
                         }
-                        Icon(Icons.Rounded.PlayArrow, null, tint = green)
                     }
                 }
             }
