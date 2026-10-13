@@ -202,6 +202,7 @@ fn run_engine(
         .build() {
         Ok(rt) => rt,
         Err(e) => {
+            emitter.event(8, 0);
             emitter.status(&format!("Rust ses motoru başlatılamadı: {e}"));
             let _ = emitter.simple("onRelease");
             return;
@@ -220,6 +221,7 @@ fn run_engine(
     let session = match session_result {
         Ok(session) => session,
         Err(err) => {
+            emitter.event(8, 0);
             emitter.status(&format!("Spotify yetkilendirme başarısız: {err}"));
             let _ = emitter.simple("onRelease");
             return;
