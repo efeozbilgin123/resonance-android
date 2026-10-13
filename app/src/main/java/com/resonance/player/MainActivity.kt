@@ -212,7 +212,7 @@ class MainActivity : ComponentActivity() {
                             page = 6
                         })
                     } else if (page == 6) {
-                        PremiumSpotifyWebScreen(this@MainActivity, pendingSpotifyPremium,
+                        SpotifyPremiumHostScreen(this@MainActivity, pendingSpotifyPremium,
                             onBack = { page = 3 }, modifier = Modifier.weight(1f))
                     } else if (page == 8 && pendingYouTube != null) {
                         YouTubePlayerScreen(this@MainActivity, pendingYouTube!!,
