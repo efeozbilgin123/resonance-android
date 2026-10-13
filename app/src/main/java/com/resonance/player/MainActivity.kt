@@ -383,7 +383,6 @@ class MainActivity : ComponentActivity() {
                                 Icon(Icons.Rounded.QueueMusic, "Oynatıcı ve sıra", tint = lime)
                             }
                         }
-                        TextButton(onClick = { page = if (page == 2 || page == 3) 1 else 2 }) { Text(if (page == 2 || page == 3) "Ara" else "Kitaplık", color = lime) }
                         IconButton(onClick = { picker.launch(arrayOf("audio/*")) }) {
                             Icon(Icons.Rounded.LibraryAdd, contentDescription = "Müzik içe aktar", tint = lime)
                         }
