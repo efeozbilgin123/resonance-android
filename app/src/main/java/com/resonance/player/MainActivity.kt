@@ -75,9 +75,9 @@ class MainActivity : ComponentActivity() {
             }
             var selected by remember { mutableStateOf<Song?>(null) }
             var playing by remember { mutableStateOf(false) }
-            var page by remember { mutableStateOf(if (incomingYouTubeUrl != null) 7 else 5) }
+            var page by remember { mutableStateOf(if (incomingYouTubeUrl != null) 1 else 5) }
             LaunchedEffect(incomingYouTubeUrl) {
-                if (incomingYouTubeUrl != null) page = 7
+                if (incomingYouTubeUrl != null) page = 1
             }
             var controllerReady by remember { mutableStateOf(false) }
             var repeatMode by remember { mutableIntStateOf(0) }
@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
             var error by remember { mutableStateOf<String?>(null) }
             var pendingExternal by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
             var pendingSpotifyPremium by remember { mutableStateOf<SpotifyTrack?>(null) }
-            var pendingYouTube by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
+            var pendingSpotifyAdd by remember { mutableStateOf<SpotifyTrack?>(null) }
             DisposableEffect(Unit) {
                 val listener = object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
@@ -176,11 +176,42 @@ class MainActivity : ComponentActivity() {
                     error = null
                 }.onFailure { error = it.localizedMessage }
             }
+            val startYouTube: (UnifiedMusicTrack, List<UnifiedMusicTrack>) -> Unit = { track, results ->
+                runCatching {
+                    require(track.source == CatalogSource.YOUTUBE) { "YouTube kaydı seçilmedi" }
+                    val active = controller ?: error("Oynatıcı henüz hazır değil")
+                    val youtubeTracks = results.filter { it.source == CatalogSource.YOUTUBE }
+                    val items = youtubeTracks.map { candidate ->
+                        MediaItem.Builder()
+                            .setUri("resonance://youtube/${candidate.id}")
+                            .setMimeType("audio/mp4")
+                            .setMediaId("youtube:${candidate.id}")
+                            .setMediaMetadata(MediaMetadata.Builder()
+                                .setTitle(candidate.title)
+                                .setArtist(candidate.artist)
+                                .setArtworkUri(
+                                    candidate.cover.takeIf { it.startsWith("https://") }
+                                        ?.let(Uri::parse)
+                                )
+                                .build())
+                            .build()
+                    }
+                    val index = youtubeTracks.indexOfFirst { it.id == track.id }
+                    require(index >= 0) { "Parça çalma sırasında bulunamadı" }
+                    active.setMediaItems(items, index, 0L)
+                    active.prepare()
+                    active.play()
+                    selected = Song(Uri.parse("resonance://youtube/${track.id}"),
+                        track.title, track.artist)
+                    playing = true
+                    error = null
+                }.onFailure { error = it.localizedMessage }
+            }
             val playExternal: (ExternalPlaylistItem) -> Unit = { track ->
                 if (track.source == "youtube") {
-                    controller?.pause()
-                    pendingYouTube = track
-                    page = 8
+                    val parsed = UnifiedMusicTrack(track.id, track.title, track.artist, 0,
+                        track.artwork, CatalogSource.YOUTUBE, 1.0)
+                    startYouTube(parsed, listOf(parsed))
                 } else runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     val item = MediaItem.Builder().setUri(track.playbackUri)
@@ -206,36 +237,67 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     if (page == 3) {
-                        SpotifyScreen(this@MainActivity, playExternal, onPremiumPlay = { track ->
-                            controller?.pause()
-                            pendingSpotifyPremium = track
-                            page = 6
-                        })
-                    } else if (page == 6) {
-                        SpotifyPremiumHostScreen(this@MainActivity, pendingSpotifyPremium,
-                            onBack = { page = 3 }, modifier = Modifier.weight(1f))
-                    } else if (page == 8 && pendingYouTube != null) {
-                        YouTubePlayerScreen(this@MainActivity, pendingYouTube!!,
-                            onBack = { pendingYouTube = null; page = 7 },
-                            modifier = Modifier.weight(1f))
-                    } else if (page == 7) {
-                        YouTubeLibraryScreen(this@MainActivity, incomingYouTubeUrl,
-                            consumeShare = { incomingYouTubeUrl = null },
-                            onPlay = playExternal,
-                            onAddToPlaylist = { pendingExternal = it },
-                            modifier = Modifier.weight(1f))
+                        SpotifyScreen(this@MainActivity, playExternal,
+                            onPremiumPlay = { track ->
+                                controller?.pause()
+                                pendingSpotifyPremium = track
+                                page = 6
+                            },
+                            onSearchClick = { page = 1 })
+                    } else if (page == 1) {
+                        UnifiedSearchScreen(
+                            activity = this@MainActivity,
+                            onYouTubePlay = startYouTube,
+                            onSpotifyPlay = { track ->
+                                controller?.pause()
+                                pendingSpotifyPremium = track
+                                page = 6
+                            },
+                            onExternalAdd = { pendingExternal = it },
+                            onSpotifyAdd = { pendingSpotifyAdd = it },
+                            modifier = Modifier.weight(1f),
+                            incomingUrl = incomingYouTubeUrl,
+                            consumeIncomingUrl = { incomingYouTubeUrl = null }
+                        )
+                        selected?.let { track ->
+                            Row(Modifier.fillMaxWidth().background(panel).padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.MusicNote, null, tint = lime)
+                                Spacer(Modifier.width(8.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(track.title, maxLines = 1, color = Color.White)
+                                    Text(track.artist, color = muted, fontSize = 12.sp)
+                                }
+                                IconButton(onClick = { controller?.seekToPreviousMediaItem() }) {
+                                    Icon(Icons.Rounded.SkipPrevious, "Önceki", tint = lime)
+                                }
+                                IconButton(onClick = { controller?.let {
+                                    if (it.isPlaying) it.pause() else it.play()
+                                } }) {
+                                    Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                        "Çal / duraklat", tint = lime)
+                                }
+                                IconButton(onClick = { controller?.seekToNextMediaItem() }) {
+                                    Icon(Icons.Rounded.SkipNext, "Sonraki", tint = lime)
+                                }
+                            }
+                        }
                         NavigationBar(containerColor = panel) {
                             listOf(
                                 Triple("Müzik", Icons.Rounded.Album, 5),
-                                Triple("YouTube", Icons.Rounded.SmartDisplay, 7),
+                                Triple("Ara", Icons.Rounded.Search, 1),
                                 Triple("Radyo", Icons.Rounded.Radio, 4),
                                 Triple("Yerel", Icons.Rounded.Home, 0),
                                 Triple("Kitaplık", Icons.Rounded.LibraryMusic, 2)
                             ).forEach { (label, icon, n) ->
-                                NavigationBarItem(selected = page == n, onClick = { page = n },
+                                NavigationBarItem(selected = page == n,
+                                    onClick = { page = n },
                                     icon = { Icon(icon, null) }, label = { Text(label) })
                             }
                         }
+                    } else if (page == 6) {
+                        SpotifyPremiumHostScreen(this@MainActivity, pendingSpotifyPremium,
+                            onBack = { page = 3 }, modifier = Modifier.weight(1f))
                     } else if (page == 4 || page == 5) {
                         if (page == 5) {
                             AudiusScreen(this@MainActivity, startAudius, Modifier.weight(1f),
@@ -271,7 +333,6 @@ class MainActivity : ComponentActivity() {
                         NavigationBar(containerColor = panel) {
                             listOf(
                                 Triple("Müzik", Icons.Rounded.Album, 5),
-                                Triple("YouTube", Icons.Rounded.SmartDisplay, 7),
                                 Triple("Radyo", Icons.Rounded.Radio, 4),
                                 Triple("Yerel", Icons.Rounded.Home, 0),
                                 Triple("Ara", Icons.Rounded.Search, 1),
@@ -378,7 +439,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     NavigationBar(containerColor = panel) {
-                        listOf(Triple("Müzik", Icons.Rounded.Album, 5), Triple("YouTube", Icons.Rounded.SmartDisplay, 7), Triple("Radyo", Icons.Rounded.Radio, 4), Triple("Yerel", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
+                        listOf(Triple("Müzik", Icons.Rounded.Album, 5), Triple("Radyo", Icons.Rounded.Radio, 4), Triple("Yerel", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
                             NavigationBarItem(selected = page == n, onClick = { page = n }, icon = { Icon(icon, null) }, label = { Text(label) })
                         }
                     }
@@ -387,6 +448,10 @@ class MainActivity : ComponentActivity() {
                 pendingExternal?.let { track ->
                     SpotifyPlaylistPicker(this@MainActivity, external = track,
                         onDismiss = { pendingExternal = null })
+                }
+                pendingSpotifyAdd?.let { track ->
+                    SpotifyPlaylistPicker(this@MainActivity, spotifyTrack = track,
+                        onDismiss = { pendingSpotifyAdd = null })
                 }
             }
         }
