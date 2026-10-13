@@ -87,8 +87,8 @@ object RelevanceRanker {
             .thenBy { it.stableId })
         val seen = mutableSetOf<String>()
         return ranked.filter {
-            val key = it.source.name + ":" + normalize(it.title).replace("official audio", "")
-                + ":" + normalize(it.artist).replace(" topic", "")
+            val key = it.source.name + ":" + normalize(it.title).replace("official audio", "") +
+                ":" + normalize(it.artist).replace(" topic", "")
             if (seen.add(key)) true else false
         }.take(60)
     }
