@@ -2,7 +2,7 @@ name: Build Resonance Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'feature/unified-spotube-search-v07']
+    branches: [main, 'feature/local-newpipe-provider-v071']
 concurrency:
   group: resonance-${{ github.ref }}
   cancel-in-progress: true
