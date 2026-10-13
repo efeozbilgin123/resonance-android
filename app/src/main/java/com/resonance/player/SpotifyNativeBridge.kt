@@ -52,6 +52,7 @@ class SpotifyPcmOutput(
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var audioTrack: AudioTrack? = null
+    @Volatile private var closed = false
     private val attributes = AudioAttributes.Builder()
         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
         .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -67,6 +68,7 @@ class SpotifyPcmOutput(
 
     @Synchronized
     fun onStart() {
+        if (closed) return
         val existing = audioTrack
         if (existing != null) {
             if (existing.playState != AudioTrack.PLAYSTATE_PLAYING) {
@@ -93,6 +95,7 @@ class SpotifyPcmOutput(
 
     @Synchronized
     fun onPcm(chunk: ByteArray) {
+        if (closed) return
         if (audioTrack == null) onStart()
         val output = audioTrack ?: return
         var offset = 0
@@ -117,8 +120,11 @@ class SpotifyPcmOutput(
         }
     }
 
+    fun onRelease() { release() }
+
     @Synchronized
     fun release() {
+        closed = true
         audioTrack?.let {
             runCatching { it.pause() }
             runCatching { it.flush() }
