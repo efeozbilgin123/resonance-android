@@ -214,11 +214,17 @@ class YouTubeAudioProvider(context: Context) {
         val server: String)
 
     private val streamCache = ConcurrentHashMap<String, Pair<Long, Resolved>>()
-    private val rejectedProvider = ConcurrentHashMap<String, String>()
+    private val rejectedProviders =
+        ConcurrentHashMap<String, MutableSet<String>>()
+
+    private fun rejected(videoId: String, name: String): Boolean =
+        rejectedProviders[videoId]?.contains(name) == true
 
     fun invalidate(videoId: String) {
         streamCache.remove(videoId)?.let { cached ->
-            rejectedProvider[videoId] = cached.second.server
+            rejectedProviders.computeIfAbsent(videoId) {
+                ConcurrentHashMap.newKeySet<String>()
+            }.add(cached.second.server)
         }
     }
 
@@ -227,7 +233,7 @@ class YouTubeAudioProvider(context: Context) {
         streamCache[videoId]?.takeIf { it.first > System.currentTimeMillis() }
             ?.let { return it.second }
         var last: Exception? = null
-        if (preferredServer.isBlank() && rejectedProvider[videoId] != "NewPipe") {
+        if (preferredServer.isBlank() && !rejected(videoId, "NewPipe")) {
             try {
                 val audio = YouTubeMusicProvider.resolveAudio(videoId)
                 val result = Resolved(audio.url, audio.mimeType, "NewPipe")
@@ -238,7 +244,7 @@ class YouTubeAudioProvider(context: Context) {
             }
         }
         for (base in bases()) {
-            if (base == rejectedProvider[videoId]) continue
+            if (rejected(videoId, base)) continue
             try {
                 val piped = base.contains("piped")
                 val response = JSONObject(api(base,
