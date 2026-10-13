@@ -95,13 +95,25 @@ class MainActivity : ComponentActivity() {
             var pendingSpotifyPremium by remember { mutableStateOf<SpotifyTrack?>(null) }
             var pendingYouTube by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
             var pendingAddSpotify by remember { mutableStateOf<SpotifyTrack?>(null) }
-            var playbackQueue by remember { mutableStateOf(PlaybackQueue()) }
+            val queueStorage = remember { PlaybackQueuePersistence(this@MainActivity) }
+            var playbackQueue by remember { mutableStateOf(queueStorage.restore()) }
+            LaunchedEffect(playbackQueue) {
+                withContext(Dispatchers.IO) { queueStorage.save(playbackQueue) }
+            }
             var playbackPosition by remember { mutableLongStateOf(0L) }
             var playbackDuration by remember { mutableLongStateOf(0L) }
             val latestAutoAdvance = remember { mutableStateOf<() -> Unit>({}) }
             val spotifyEngine = SpotifyAudioEngine
             var streamRequest by remember { mutableIntStateOf(0) }
-            var activeUnified by remember { mutableStateOf<UnifiedSong?>(null) }
+            var activeUnified by remember {
+                mutableStateOf<UnifiedSong?>(playbackQueue.current)
+            }
+            LaunchedEffect(Unit) {
+                activeUnified?.let {
+                    if (selected == null) selected = Song(
+                        Uri.parse(it.id), it.title, it.artist)
+                }
+            }
             var audioRetryAttempts by remember { mutableIntStateOf(0) }
             var consecutiveFailures by remember { mutableIntStateOf(0) }
             val scope = rememberCoroutineScope()
