@@ -137,6 +137,8 @@ class MainActivity : ComponentActivity() {
                 storage.edit().putStringSet("uris", songs.map { it.uri.toString() }.toSet()).apply()
             }
             val startSong: (Song) -> Unit = { track ->
+                unifiedQueue = emptyList()
+                unifiedQueueIndex = -1
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     active.setMediaItem(MediaItem.Builder().setUri(track.uri).setMediaMetadata(
@@ -150,6 +152,8 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val startRadio: (RadioStation) -> Unit = { station ->
+                unifiedQueue = emptyList()
+                unifiedQueueIndex = -1
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     val item = MediaItem.Builder().setUri(station.stream)
@@ -166,6 +170,8 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val startAudius: (AudiusTrack, List<AudiusTrack>) -> Unit = { track, tracks ->
+                unifiedQueue = emptyList()
+                unifiedQueueIndex = -1
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     val playable = tracks.map { candidate ->
@@ -188,6 +194,8 @@ class MainActivity : ComponentActivity() {
             }
             val launchUnifiedAudio: (UnifiedSong) -> Unit = { track ->
                 if (track.source == MusicOrigin.SPOTIFY) {
+                    unifiedQueue = emptyList()
+                    unifiedQueueIndex = -1
                     controller?.pause()
                     pendingSpotifyPremium = track.spotifyTrack()
                     page = 6
@@ -243,6 +251,21 @@ class MainActivity : ComponentActivity() {
                     unifiedQueueIndex = n
                     launchUnifiedAudio(unifiedQueue[n])
                 } else controller?.seekToPreviousMediaItem()
+            }
+            // Advance to the next YouTube/Audius stream when playback finishes.
+            DisposableEffect(controllerReady, unifiedQueue, unifiedQueueIndex) {
+                val active = controller
+                val transition = object : Player.Listener {
+                    override fun onPlaybackStateChanged(state: Int) {
+                        if (state == Player.STATE_ENDED &&
+                            unifiedQueueIndex >= 0 &&
+                            unifiedQueueIndex < unifiedQueue.lastIndex) {
+                            unifiedNext()
+                        }
+                    }
+                }
+                active?.addListener(transition)
+                onDispose { active?.removeListener(transition) }
             }
             val playExternal: (ExternalPlaylistItem) -> Unit = { track ->
                 if (track.source == "youtube") {
