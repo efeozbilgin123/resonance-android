@@ -5,8 +5,6 @@ import android.media.MediaMetadataRetriever
 import androidx.media3.common.MediaItem
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import androidx.concurrent.futures.CallbackToFutureAdapter
-import com.google.common.util.concurrent.MoreExecutors
 import androidx.core.content.ContextCompat
 import android.content.ComponentName
 import android.net.Uri
@@ -56,6 +54,7 @@ class MainActivity : ComponentActivity() {
             var playing by remember { mutableStateOf(false) }
             var page by remember { mutableStateOf(0) }
             var search by remember { mutableStateOf("") }
+            var streamUrl by remember { mutableStateOf("") }
             var favorites by remember { mutableStateOf(storage.getStringSet("favorites", emptySet()).orEmpty()) }
             var error by remember { mutableStateOf<String?>(null) }
             val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { chosen ->
@@ -72,7 +71,7 @@ class MainActivity : ComponentActivity() {
                     active.prepare()
                     active.play()
                     selected = track
-                    playing = false
+                    playing = true
                     error = null
                 }.onFailure { error = it.localizedMessage }
             }
@@ -98,6 +97,22 @@ class MainActivity : ComponentActivity() {
                         OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth().padding(horizontal = 22.dp),
                             singleLine = true, label = { Text("Yerel şarkılarında ara") },
                             leadingIcon = { Icon(Icons.Rounded.Search, null) })
+                    }
+                    if (page == 1) {
+                        OutlinedTextField(streamUrl, { streamUrl = it }, Modifier.fillMaxWidth().padding(horizontal = 22.dp), singleLine = true, label = { Text("İzinli HTTPS radyo / ses akışı URL") })
+                        Button(onClick = {
+                            runCatching {
+                                val uri = Uri.parse(streamUrl.trim())
+                                require(uri.scheme == "https" && !uri.host.isNullOrBlank()) { "Geçerli HTTPS adresi gir" }
+                                val active = controller ?: error("Oynatıcı henüz hazır değil")
+                                active.setMediaItem(MediaItem.fromUri(uri))
+                                active.prepare()
+                                active.play()
+                                selected = Song(uri, "Çevrimiçi yayın", "Bağımsız ses kaynağı")
+                                playing = true
+                                error = null
+                            }.onFailure { error = it.localizedMessage }
+                        }, modifier = Modifier.padding(horizontal = 22.dp)) { Text("Yayını çal") }
                     }
                     if (songs.isEmpty()) {
                         Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
