@@ -24,7 +24,7 @@ class PlaybackQueueTest {
         assertNull(last.forward(automatic=true))
         assertEquals(spotify, last.withRepeat(1).forward(automatic=true)?.current)
         assertEquals(audius, last.withRepeat(2).forward(automatic=true)?.current)
-        assertEquals(audius, last.withRepeat(2).forward()?.current)
+        assertEquals(spotify, last.withRepeat(2).forward()?.current)
         assertEquals(spotify, PlaybackQueue().start(original,spotify.stableKey).backward()?.current)
     }
 
