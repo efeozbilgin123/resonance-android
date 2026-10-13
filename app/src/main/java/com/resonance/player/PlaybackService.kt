@@ -1,6 +1,7 @@
 package com.resonance.player
 
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
@@ -14,6 +15,8 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         val player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this)
+                .setDataSourceFactory(ResonanceAudioDataSource.Factory(this)))
             .setHandleAudioBecomingNoisy(true)
             .build()
         session = MediaSession.Builder(this, player).build()
