@@ -292,7 +292,7 @@ class UnifiedMusicCatalog(private val context: Context, private val spotify: Spo
 
     fun searchSpotify(query: String): List<UnifiedSong> {
         if (!spotify.authorized) return emptyList()
-        val arr = spotify.get("/search?q=${Uri.encode(query.trim())}&type=track&limit=35")
+        val arr = spotify.get("/search?q=${Uri.encode(query.trim())}&type=track&limit=10")
             .optJSONObject("tracks")?.optJSONArray("items") ?: JSONArray()
         return (0 until arr.length()).mapNotNull { i ->
             val obj = arr.optJSONObject(i) ?: return@mapNotNull null
