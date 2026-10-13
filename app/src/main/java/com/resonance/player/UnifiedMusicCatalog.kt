@@ -151,8 +151,22 @@ class YouTubeAudioProvider(context: Context) {
 
     fun search(query: String): List<UnifiedSong> {
         require(query.isNotBlank())
-        val q = Uri.encode(query.trim())
         var last: Exception? = null
+        // Prefer direct YouTube Music Songs results without depending on
+        // volunteer Piped/Invidious instances. If Youtube changes its API,
+        // existing Piped/Invidious fallback still works.
+        if (preferredServer.isBlank()) {
+            try {
+                val local = YouTubeMusicProvider.search(query.trim()).map {
+                    UnifiedSong(it.videoId, MusicOrigin.YOUTUBE_MUSIC,
+                        it.title, it.artist, it.durationSeconds, it.artwork)
+                }
+                if (local.isNotEmpty()) return local
+            } catch (e: Exception) {
+                last = e
+            }
+        }
+        val q = Uri.encode(query.trim())
         for (base in bases()) {
             try {
                 val piped = base.contains("piped")
@@ -209,6 +223,16 @@ class YouTubeAudioProvider(context: Context) {
         streamCache[videoId]?.takeIf { it.first > System.currentTimeMillis() }
             ?.let { return it.second }
         var last: Exception? = null
+        if (preferredServer.isBlank() && rejectedProvider[videoId] != "NewPipe") {
+            try {
+                val audio = YouTubeMusicProvider.resolveAudio(videoId)
+                val result = Resolved(audio.url, audio.mimeType, "NewPipe")
+                streamCache[videoId] = (System.currentTimeMillis() + 7 * 60_000L) to result
+                return result
+            } catch (e: Exception) {
+                last = e
+            }
+        }
         for (base in bases()) {
             if (base == rejectedProvider[videoId]) continue
             try {
