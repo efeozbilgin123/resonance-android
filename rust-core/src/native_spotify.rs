@@ -203,6 +203,7 @@ fn run_engine(
         Ok(rt) => rt,
         Err(e) => {
             emitter.status(&format!("Rust ses motoru başlatılamadı: {e}"));
+            let _ = emitter.simple("onRelease");
             return;
         }
     };
@@ -220,6 +221,7 @@ fn run_engine(
         Ok(session) => session,
         Err(err) => {
             emitter.status(&format!("Spotify yetkilendirme başarısız: {err}"));
+            let _ = emitter.simple("onRelease");
             return;
         }
     };
@@ -296,6 +298,7 @@ fn run_engine(
         }
     }
     drop(player);
+    let _ = emitter.simple("onRelease");
     emitter.status("Spotify Premium oynatıcısı kapatıldı.");
     runtime.shutdown_background();
 }
