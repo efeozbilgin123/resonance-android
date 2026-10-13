@@ -47,7 +47,8 @@ object SpotifyNativeBridge {
  * external streaming service. Playback stays inside this application.
  */
 class SpotifyPcmOutput(
-    private val onStatusChanged: (String) -> Unit
+    private val onStatusChanged: (String) -> Unit,
+    private val onEngineEventReceived: (Int, Int) -> Unit = { _, _ -> }
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var audioTrack: AudioTrack? = null
@@ -58,6 +59,10 @@ class SpotifyPcmOutput(
 
     fun onStatus(status: String) {
         mainHandler.post { onStatusChanged(status.take(400)) }
+    }
+
+    fun onEngineEvent(code: Int, positionMs: Int) {
+        mainHandler.post { onEngineEventReceived(code, positionMs.coerceAtLeast(0)) }
     }
 
     @Synchronized
