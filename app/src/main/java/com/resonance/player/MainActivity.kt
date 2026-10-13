@@ -102,7 +102,8 @@ class MainActivity : ComponentActivity() {
             val spotifyEngine = SpotifyAudioEngine
             var streamRequest by remember { mutableIntStateOf(0) }
             var activeUnified by remember { mutableStateOf<UnifiedSong?>(null) }
-            var audioRetryUsed by remember { mutableStateOf(false) }
+            var audioRetryAttempts by remember { mutableIntStateOf(0) }
+            var consecutiveFailures by remember { mutableIntStateOf(0) }
             val scope = rememberCoroutineScope()
             val unifiedCatalog = remember { UnifiedMusicCatalog(this@MainActivity,
                 SpotifyClient(this@MainActivity)) }
@@ -110,7 +111,10 @@ class MainActivity : ComponentActivity() {
                 val listener = object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         playing = isPlaying
-                        if (isPlaying) error = null
+                        if (isPlaying) {
+                            error = null
+                            consecutiveFailures = 0
+                        }
                     }
                     override fun onPlaybackStateChanged(state: Int) {
                         if (state == Player.STATE_ENDED &&
@@ -128,12 +132,13 @@ class MainActivity : ComponentActivity() {
                     override fun onPlayerError(playerError: PlaybackException) {
                         val track = activeUnified
                         if (track?.source == MusicOrigin.YOUTUBE_MUSIC &&
-                            !audioRetryUsed) {
-                            audioRetryUsed = true
-                            error = "YouTube ses kaynağı değiştiriliyor..."
+                            audioRetryAttempts < 3) {
+                            audioRetryAttempts++
+                            error = "YouTube ses kaynağı değiştiriliyor... (${audioRetryAttempts}/3)"
                             val seq = streamRequest
                             scope.launch {
                                 try {
+                                    delay(350L * audioRetryAttempts)
                                     val fresh = withContext(Dispatchers.IO) {
                                         unifiedCatalog.invalidateStream(track)
                                         unifiedCatalog.audioStream(track)
@@ -154,12 +159,18 @@ class MainActivity : ComponentActivity() {
                                     if (seq == streamRequest) {
                                         error = "YouTube kaynakları kullanılamıyor: ${e.localizedMessage}"
                                         playing = false
+                                        consecutiveFailures++
+                                        if (consecutiveFailures <= 3)
+                                            latestAutoAdvance.value()
                                     }
                                 }
                             }
                         } else {
                             error = "Ses kaynağı açılamadı: ${playerError.localizedMessage}"
                             playing = false
+                            consecutiveFailures++
+                            if (activeUnified != null && consecutiveFailures <= 3)
+                                latestAutoAdvance.value()
                         }
                     }
                 }
@@ -259,7 +270,7 @@ class MainActivity : ComponentActivity() {
                     }
                 } else {
                     if (spotifyEngine.ready || spotifyEngine.connecting) spotifyEngine.stop()
-                    audioRetryUsed = false
+                    audioRetryAttempts = 0
                     val seq = ++streamRequest
                     controller?.pause()
                     scope.launch {
