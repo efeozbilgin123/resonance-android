@@ -72,7 +72,7 @@ class SpotifyClient(private val activity: Activity) {
                     )
                     val scope = "user-read-private user-read-email playlist-read-private " +
                         "playlist-read-collaborative user-library-read user-read-playback-state " +
-                        "user-modify-playback-state playlist-modify-public playlist-modify-private"
+                        "user-modify-playback-state playlist-modify-public playlist-modify-private streaming"
                     val authUrl = "https://accounts.spotify.com/authorize?" + form(mapOf(
                         "client_id" to id, "response_type" to "code", "redirect_uri" to CALLBACK,
                         "scope" to scope, "code_challenge_method" to "S256",
@@ -130,6 +130,9 @@ class SpotifyClient(private val activity: Activity) {
         pref.edit().putString("access_token", accessToken).putString("refresh_token", refreshToken)
             .putLong("expires_at", expiration).apply()
     }
+
+    /** Used only by the experimental trusted local Web Playback SDK page. */
+    fun webPlaybackToken(): String = validToken()
 
     fun get(path: String): JSONObject = api("GET", path)
     fun put(path: String, body: JSONObject? = null) = api("PUT", path, body)
