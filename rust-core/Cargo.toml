@@ -1,6 +1,6 @@
 [package]
 name = "resonance_core"
-version = "0.3.0"
+version = "0.6.0"
 edition = "2021"
 
 [lib]
@@ -9,3 +9,10 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 jni = { version = "0.21", default-features = false }
+
+# Android-only Spotify Premium engine: librespot decodes Spotify audio,
+# Android AudioTrack renders PCM. Rustls avoids Android OpenSSL dependencies.
+[target.'cfg(target_os = "android")'.dependencies]
+librespot-core = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-playback = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros"] }
