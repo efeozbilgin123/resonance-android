@@ -5,6 +5,7 @@ import androidx.compose.runtime.DisposableEffect
 import android.media.MediaMetadataRetriever
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.session.MediaController
@@ -56,7 +57,7 @@ class MainActivity : ComponentActivity() {
             }
             var selected by remember { mutableStateOf<Song?>(null) }
             var playing by remember { mutableStateOf(false) }
-            var page by remember { mutableStateOf(4) }
+            var page by remember { mutableStateOf(5) }
             var controllerReady by remember { mutableStateOf(false) }
             var repeatMode by remember { mutableIntStateOf(0) }
             var shuffle by remember { mutableStateOf(false) }
@@ -68,6 +69,13 @@ class MainActivity : ComponentActivity() {
             DisposableEffect(Unit) {
                 val listener = object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
+                    override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
+                        item ?: return
+                        val location = item.localConfiguration?.uri ?: return
+                        selected = Song(location,
+                            item.mediaMetadata.title?.toString() ?: "Ses yayını",
+                            item.mediaMetadata.artist?.toString() ?: "Resonance")
+                    }
                     override fun onPlayerError(playerError: PlaybackException) {
                         error = "Ses kaynağı açılamadı: ${playerError.localizedMessage}"
                         playing = false
@@ -123,20 +131,45 @@ class MainActivity : ComponentActivity() {
                     error = null
                 }.onFailure { error = it.localizedMessage }
             }
+            val startAudius: (AudiusTrack, List<AudiusTrack>) -> Unit = { track, tracks ->
+                runCatching {
+                    val active = controller ?: error("Oynatıcı henüz hazır değil")
+                    val playable = tracks.map { candidate ->
+                        MediaItem.Builder()
+                            .setUri(candidate.audioUrl)
+                            .setMimeType(MimeTypes.AUDIO_MPEG)
+                            .setMediaId(candidate.id)
+                            .setMediaMetadata(MediaMetadata.Builder()
+                                .setTitle(candidate.title).setArtist(candidate.artist).build())
+                            .build()
+                    }
+                    val index = tracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+                    active.setMediaItems(playable, index, 0L)
+                    active.prepare()
+                    active.play()
+                    selected = Song(Uri.parse(track.audioUrl), track.title, track.artist)
+                    playing = true
+                    error = null
+                }.onFailure { error = it.localizedMessage }
+            }
             MaterialTheme(colorScheme = darkColorScheme(primary = lime, background = bg, surface = panel)) {
                 Column(Modifier.fillMaxSize().background(bg).statusBarsPadding().navigationBarsPadding()) {
                     Row(Modifier.fillMaxWidth().padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("RESONANCE", color = lime, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp)
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { page = 3 }) { Text("Spotify", color = lime) }
+                        TextButton(onClick = { page = if (page == 3) 5 else 3 }) { Text(if (page == 3) "Geri" else "Spotify hesabı", color = lime) }
                         IconButton(onClick = { picker.launch(arrayOf("audio/*")) }) {
                             Icon(Icons.Rounded.LibraryAdd, contentDescription = "Müzik içe aktar", tint = lime)
                         }
                     }
                     if (page == 3) {
                         SpotifyScreen(this@MainActivity)
-                    } else if (page == 4) {
-                        RadioScreen(this@MainActivity, startRadio, Modifier.weight(1f))
+                    } else if (page == 4 || page == 5) {
+                        if (page == 5) {
+                            AudiusScreen(this@MainActivity, startAudius, Modifier.weight(1f))
+                        } else {
+                            RadioScreen(this@MainActivity, startRadio, Modifier.weight(1f))
+                        }
                         selected?.let { track ->
                             Row(Modifier.fillMaxWidth().background(panel).padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
@@ -146,16 +179,25 @@ class MainActivity : ComponentActivity() {
                                     Text(track.title, color = Color.White, maxLines = 1)
                                     Text(track.artist, color = muted, fontSize = 12.sp)
                                 }
+                                IconButton(onClick = { controller?.seekToPreviousMediaItem() },
+                                    enabled = controllerReady) {
+                                    Icon(Icons.Rounded.SkipPrevious, "Önceki", tint = lime)
+                                }
                                 IconButton(onClick = {
                                     controller?.let { if (it.isPlaying) it.pause() else it.play() }
                                 }, enabled = controllerReady) {
                                     Icon(if (playing) Icons.Rounded.PauseCircleFilled else Icons.Rounded.PlayCircleFilled,
                                         contentDescription = if (playing) "Duraklat" else "Çal", tint = lime)
                                 }
+                                IconButton(onClick = { controller?.seekToNextMediaItem() },
+                                    enabled = controllerReady) {
+                                    Icon(Icons.Rounded.SkipNext, "Sonraki", tint = lime)
+                                }
                             }
                         }
                         NavigationBar(containerColor = panel) {
                             listOf(
+                                Triple("Müzik", Icons.Rounded.Album, 5),
                                 Triple("Radyo", Icons.Rounded.Radio, 4),
                                 Triple("Yerel", Icons.Rounded.Home, 0),
                                 Triple("Ara", Icons.Rounded.Search, 1),
@@ -255,7 +297,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     NavigationBar(containerColor = panel) {
-                        listOf(Triple("Radyo", Icons.Rounded.Radio, 4), Triple("Yerel", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
+                        listOf(Triple("Müzik", Icons.Rounded.Album, 5), Triple("Radyo", Icons.Rounded.Radio, 4), Triple("Yerel", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
                             NavigationBarItem(selected = page == n, onClick = { page = n }, icon = { Icon(icon, null) }, label = { Text(label) })
                         }
                     }
