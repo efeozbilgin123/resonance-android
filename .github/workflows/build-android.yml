@@ -43,9 +43,9 @@ jobs:
       - name: Verify Rust core tests
         run: cargo test --manifest-path rust-core/Cargo.toml
       - name: Build APK
-        run: gradle --no-daemon :app:assembleDebug
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: Resonance-Independent-Android-v0.4
+          name: Resonance-Android-v0.5
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
