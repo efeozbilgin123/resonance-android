@@ -97,6 +97,8 @@ class MainActivity : ComponentActivity() {
             var unifiedQueue by remember { mutableStateOf<List<UnifiedSong>>(emptyList()) }
             var unifiedQueueIndex by remember { mutableIntStateOf(-1) }
             var streamRequest by remember { mutableIntStateOf(0) }
+            var activeUnified by remember { mutableStateOf<UnifiedSong?>(null) }
+            var audioRetryUsed by remember { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
             val unifiedCatalog = remember { UnifiedMusicCatalog(this@MainActivity,
                 SpotifyClient(this@MainActivity)) }
@@ -111,8 +113,41 @@ class MainActivity : ComponentActivity() {
                             item.mediaMetadata.artist?.toString() ?: "Resonance")
                     }
                     override fun onPlayerError(playerError: PlaybackException) {
-                        error = "Ses kaynağı açılamadı: ${playerError.localizedMessage}"
-                        playing = false
+                        val track = activeUnified
+                        if (track?.source == MusicOrigin.YOUTUBE_MUSIC &&
+                            !audioRetryUsed) {
+                            audioRetryUsed = true
+                            error = "YouTube ses kaynağı değiştiriliyor..."
+                            val seq = streamRequest
+                            scope.launch {
+                                try {
+                                    val fresh = withContext(Dispatchers.IO) {
+                                        unifiedCatalog.invalidateStream(track)
+                                        unifiedCatalog.audioStream(track)
+                                    }
+                                    if (seq == streamRequest) {
+                                        val active = controller ?: kotlin.error("Oynatıcı hazır değil")
+                                        active.setMediaItem(MediaItem.Builder().setUri(fresh.url)
+                                            .setMimeType(fresh.mimeType)
+                                            .setMediaId(track.stableKey)
+                                            .setMediaMetadata(MediaMetadata.Builder()
+                                                .setTitle(track.title).setArtist(track.artist)
+                                                .build()).build())
+                                        active.prepare()
+                                        active.play()
+                                        error = null
+                                    }
+                                } catch (e: Exception) {
+                                    if (seq == streamRequest) {
+                                        error = "YouTube kaynakları kullanılamıyor: ${e.localizedMessage}"
+                                        playing = false
+                                    }
+                                }
+                            }
+                        } else {
+                            error = "Ses kaynağı açılamadı: ${playerError.localizedMessage}"
+                            playing = false
+                        }
                     }
                 }
                 var registered = false
@@ -137,6 +172,7 @@ class MainActivity : ComponentActivity() {
                 storage.edit().putStringSet("uris", songs.map { it.uri.toString() }.toSet()).apply()
             }
             val startSong: (Song) -> Unit = { track ->
+                activeUnified = null
                 unifiedQueue = emptyList()
                 unifiedQueueIndex = -1
                 runCatching {
@@ -152,6 +188,7 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val startRadio: (RadioStation) -> Unit = { station ->
+                activeUnified = null
                 unifiedQueue = emptyList()
                 unifiedQueueIndex = -1
                 runCatching {
@@ -170,6 +207,7 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val startAudius: (AudiusTrack, List<AudiusTrack>) -> Unit = { track, tracks ->
+                activeUnified = null
                 unifiedQueue = emptyList()
                 unifiedQueueIndex = -1
                 runCatching {
@@ -194,12 +232,15 @@ class MainActivity : ComponentActivity() {
             }
             val launchUnifiedAudio: (UnifiedSong) -> Unit = { track ->
                 if (track.source == MusicOrigin.SPOTIFY) {
+                    activeUnified = null
                     unifiedQueue = emptyList()
                     unifiedQueueIndex = -1
                     controller?.pause()
                     pendingSpotifyPremium = track.spotifyTrack()
                     page = 6
                 } else {
+                    activeUnified = track
+                    audioRetryUsed = false
                     val seq = ++streamRequest
                     controller?.pause()
                     error = null
