@@ -235,7 +235,7 @@ fun HybridSpotifyPlaylists(
                         runTask {
                             val query = URLEncoder.encode(search.trim(), "UTF-8")
                             val data = withContext(Dispatchers.IO) {
-                                client.get("/search?q=$query&type=track&limit=30")
+                                client.get("/search?q=$query&type=track&limit=10")
                             }
                             val arr = data.optJSONObject("tracks")?.optJSONArray("items") ?: JSONArray()
                             found = (0 until arr.length()).mapNotNull { i ->
