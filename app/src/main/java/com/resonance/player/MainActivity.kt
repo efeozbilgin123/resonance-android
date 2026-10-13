@@ -1,8 +1,12 @@
 package com.resonance.player
 
 import android.content.Context
+import androidx.compose.runtime.DisposableEffect
 import android.media.MediaMetadataRetriever
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.core.content.ContextCompat
@@ -52,11 +56,37 @@ class MainActivity : ComponentActivity() {
             }
             var selected by remember { mutableStateOf<Song?>(null) }
             var playing by remember { mutableStateOf(false) }
-            var page by remember { mutableStateOf(0) }
+            var page by remember { mutableStateOf(4) }
+            var controllerReady by remember { mutableStateOf(false) }
+            var repeatMode by remember { mutableIntStateOf(0) }
+            var shuffle by remember { mutableStateOf(false) }
+            var queueIndex by remember { mutableIntStateOf(0) }
             var search by remember { mutableStateOf("") }
             var streamUrl by remember { mutableStateOf("") }
             var favorites by remember { mutableStateOf(storage.getStringSet("favorites", emptySet()).orEmpty()) }
             var error by remember { mutableStateOf<String?>(null) }
+            DisposableEffect(Unit) {
+                val listener = object : Player.Listener {
+                    override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
+                    override fun onPlayerError(playerError: PlaybackException) {
+                        error = "Ses kaynağı açılamadı: ${playerError.localizedMessage}"
+                        playing = false
+                    }
+                }
+                var registered = false
+                val attach = {
+                    val c = controller
+                    if (c != null && !registered) {
+                        c.addListener(listener)
+                        registered = true
+                        controllerReady = true
+                        playing = c.isPlaying
+                    }
+                }
+                attach()
+                future.addListener({ attach() }, ContextCompat.getMainExecutor(this@MainActivity))
+                onDispose { if (registered) controller?.removeListener(listener) }
+            }
             val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { chosen ->
                 chosen.forEach { uri ->
                     try { contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
@@ -67,10 +97,28 @@ class MainActivity : ComponentActivity() {
             val startSong: (Song) -> Unit = { track ->
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
-                    active.setMediaItem(MediaItem.fromUri(track.uri))
+                    active.setMediaItem(MediaItem.Builder().setUri(track.uri).setMediaMetadata(
+                        MediaMetadata.Builder().setTitle(track.title).setArtist(track.artist).build()
+                    ).build())
                     active.prepare()
                     active.play()
                     selected = track
+                    playing = true
+                    error = null
+                }.onFailure { error = it.localizedMessage }
+            }
+            val startRadio: (RadioStation) -> Unit = { station ->
+                runCatching {
+                    val active = controller ?: error("Oynatıcı henüz hazır değil")
+                    val item = MediaItem.Builder().setUri(station.stream)
+                        .setMediaMetadata(MediaMetadata.Builder()
+                            .setTitle(station.name).setArtist("Canlı radyo · ${station.country}")
+                            .build())
+                        .build()
+                    active.setMediaItem(item)
+                    active.prepare()
+                    active.play()
+                    selected = Song(Uri.parse(station.stream), station.name, "Canlı radyo")
                     playing = true
                     error = null
                 }.onFailure { error = it.localizedMessage }
@@ -87,6 +135,36 @@ class MainActivity : ComponentActivity() {
                     }
                     if (page == 3) {
                         SpotifyScreen(this@MainActivity)
+                    } else if (page == 4) {
+                        RadioScreen(this@MainActivity, startRadio, Modifier.weight(1f))
+                        selected?.let { track ->
+                            Row(Modifier.fillMaxWidth().background(panel).padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.MusicNote, null, tint = lime)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(track.title, color = Color.White, maxLines = 1)
+                                    Text(track.artist, color = muted, fontSize = 12.sp)
+                                }
+                                IconButton(onClick = {
+                                    controller?.let { if (it.isPlaying) it.pause() else it.play() }
+                                }, enabled = controllerReady) {
+                                    Icon(if (playing) Icons.Rounded.PauseCircleFilled else Icons.Rounded.PlayCircleFilled,
+                                        contentDescription = if (playing) "Duraklat" else "Çal", tint = lime)
+                                }
+                            }
+                        }
+                        NavigationBar(containerColor = panel) {
+                            listOf(
+                                Triple("Radyo", Icons.Rounded.Radio, 4),
+                                Triple("Yerel", Icons.Rounded.Home, 0),
+                                Triple("Ara", Icons.Rounded.Search, 1),
+                                Triple("Kitaplık", Icons.Rounded.LibraryMusic, 2)
+                            ).forEach { (label, icon, n) ->
+                                NavigationBarItem(selected = page == n, onClick = { page = n },
+                                    icon = { Icon(icon, null) }, label = { Text(label) })
+                            }
+                        }
                     } else {
                     Text(
                         when(page) { 0 -> "Müzik senin dünyan."; 1 -> "Keşfet"; else -> "Kütüphanen" },
@@ -177,7 +255,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     NavigationBar(containerColor = panel) {
-                        listOf(Triple("Ana sayfa", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
+                        listOf(Triple("Radyo", Icons.Rounded.Radio, 4), Triple("Yerel", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
                             NavigationBarItem(selected = page == n, onClick = { page = n }, icon = { Icon(icon, null) }, label = { Text(label) })
                         }
                     }
