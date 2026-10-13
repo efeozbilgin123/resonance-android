@@ -7,7 +7,7 @@ import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request
 import org.schabi.newpipe.extractor.downloader.Response
 import org.schabi.newpipe.extractor.localization.Localization
-import org.schabi.newpipe.extractor.stream.AudioStream
+import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQueryHandlerFactory
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.IOException
@@ -49,40 +49,67 @@ object YouTubeMusicProvider {
     }
 
     /**
-     * Uses public YouTube search, not the YouTube Data API quota.
-     * Surfaces YouTube Music artists through the same video catalog.
+     * Uses NewPipe's YouTube Music "Songs" search filter. Falls back to Music
+     * Videos and then public video search if no songs are available.
+     * Results are source-specific; they are NOT official Spotify audio.
      */
     fun search(query: String): List<Recording> {
         require(query.length in 2..180) { "Arama 2–180 karakter olmalı" }
         initialize()
-        val extractor = ServiceList.YouTube.getSearchExtractor(query)
-        extractor.fetchPage()
-        return extractor.initialPage.items
-            .filterIsInstance<StreamInfoItem>()
-            .mapNotNull { item ->
-                val id = YouTubeLinks.parse(item.url) ?: return@mapNotNull null
-                if (!VIDEO_ID.matches(id) || item.duration < 15 || item.duration > 2700)
-                    return@mapNotNull null
-                val channel = item.uploaderName.ifBlank { "YouTube" }
-                val title = item.name.ifBlank { "Adsız parça" }
-                val text = "$title $channel".lowercase()
-                val topical = channel.contains(" - Topic", ignoreCase = true)
-                val likelihood = when {
-                    topical || text.contains("official audio") || channel.contains("vevo", true) -> 1.0
-                    text.contains("provided to youtube by") || text.contains("audio") -> 0.9
-                    text.contains("cover") || text.contains("reaction") ||
-                        text.contains("karaoke") || text.contains("nightcore") -> 0.23
-                    text.contains("live") || text.contains("lyric video") -> 0.45
-                    else -> 0.68
-                }
-                Recording(
-                    videoId = id, title = title, artist = channel,
-                    durationSeconds = item.duration.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
-                    artwork = item.thumbnails.firstOrNull()?.url
-                        ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg",
-                    musicLikelihood = likelihood
+        val musicFilters = listOf(
+            YoutubeSearchQueryHandlerFactory.MUSIC_SONGS,
+            YoutubeSearchQueryHandlerFactory.MUSIC_VIDEOS,
+            YoutubeSearchQueryHandlerFactory.VIDEOS
+        )
+        val recordings = mutableListOf<Recording>()
+        var error: Exception? = null
+
+        for (filter in musicFilters) {
+            if (recordings.size >= 28) break
+            try {
+                val extractor = ServiceList.YouTube.getSearchExtractor(
+                    query, listOf(filter), ""
                 )
-            }.distinctBy { it.videoId }.take(35)
+                extractor.fetchPage()
+                val songCategory = filter == YoutubeSearchQueryHandlerFactory.MUSIC_SONGS
+                val musicCategory = filter != YoutubeSearchQueryHandlerFactory.VIDEOS
+                val parsed = extractor.initialPage.items
+                    .filterIsInstance<StreamInfoItem>()
+                    .mapNotNull { item ->
+                        val id = YouTubeLinks.parse(item.url) ?: return@mapNotNull null
+                        if (!VIDEO_ID.matches(id) || item.duration < 15 ||
+                            item.duration > 2700) return@mapNotNull null
+                        val channel = item.uploaderName.ifBlank { "YouTube Music" }
+                        val title = item.name.ifBlank { "Adsız parça" }
+                        val lower = "$title $channel".lowercase()
+                        val topical = channel.contains(" - Topic", true)
+                        val likelihood = when {
+                            songCategory -> 1.0
+                            topical || lower.contains("official audio") ||
+                                channel.contains("vevo", true) -> 1.0
+                            lower.contains("cover") || lower.contains("reaction") ||
+                                lower.contains("karaoke") -> 0.20
+                            musicCategory -> 0.83
+                            lower.contains("live") -> 0.42
+                            else -> 0.62
+                        }
+                        Recording(
+                            videoId = id, title = title, artist = channel,
+                            durationSeconds = item.duration.coerceAtMost(
+                                Int.MAX_VALUE.toLong()).toInt(),
+                            artwork = item.thumbnails.firstOrNull()?.url
+                                ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg",
+                            musicLikelihood = likelihood
+                        )
+                    }
+                recordings += parsed
+            } catch (e: Exception) {
+                error = e
+            }
+            if (recordings.size >= 12) break
+        }
+        if (recordings.isEmpty() && error != null) throw error
+        return recordings.distinctBy { it.videoId }.take(35)
     }
 
     data class StreamLocation(val url: String, val mimeType: String)
