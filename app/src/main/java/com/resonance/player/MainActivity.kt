@@ -1,6 +1,7 @@
 package com.resonance.player
 
 import android.content.Context
+import android.content.Intent
 import androidx.compose.runtime.DisposableEffect
 import android.media.MediaMetadataRetriever
 import androidx.media3.common.MediaItem
@@ -43,9 +44,26 @@ private data class Song(val uri: Uri, val title: String, val artist: String)
 
 class MainActivity : ComponentActivity() {
     private var controller: MediaController? = null
+    private var incomingYouTubeUrl by mutableStateOf<String?>(null)
+
+    private fun acceptYouTubeShare(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND || intent.type != "text/plain") return
+        val raw = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+        val url = Regex("https://[^\\s]+").findAll(raw)
+            .map { it.value.trimEnd(')', '.', ',') }
+            .firstOrNull { YouTubeLinks.parse(it) != null }
+        if (url != null) incomingYouTubeUrl = url
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        acceptYouTubeShare(intent)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        acceptYouTubeShare(intent)
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val future = MediaController.Builder(this, token).buildAsync()
         future.addListener({ runCatching { controller = future.get() } }, ContextCompat.getMainExecutor(this))
@@ -57,7 +75,10 @@ class MainActivity : ComponentActivity() {
             }
             var selected by remember { mutableStateOf<Song?>(null) }
             var playing by remember { mutableStateOf(false) }
-            var page by remember { mutableStateOf(5) }
+            var page by remember { mutableStateOf(if (incomingYouTubeUrl != null) 7 else 5) }
+            LaunchedEffect(incomingYouTubeUrl) {
+                if (incomingYouTubeUrl != null) page = 7
+            }
             var controllerReady by remember { mutableStateOf(false) }
             var repeatMode by remember { mutableIntStateOf(0) }
             var shuffle by remember { mutableStateOf(false) }
@@ -68,6 +89,7 @@ class MainActivity : ComponentActivity() {
             var error by remember { mutableStateOf<String?>(null) }
             var pendingExternal by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
             var pendingSpotifyPremium by remember { mutableStateOf<SpotifyTrack?>(null) }
+            var pendingYouTube by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
             DisposableEffect(Unit) {
                 val listener = object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
@@ -155,7 +177,11 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val playExternal: (ExternalPlaylistItem) -> Unit = { track ->
-                runCatching {
+                if (track.source == "youtube") {
+                    controller?.pause()
+                    pendingYouTube = track
+                    page = 8
+                } else runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     val item = MediaItem.Builder().setUri(track.playbackUri)
                         .setMediaMetadata(MediaMetadata.Builder()
@@ -186,8 +212,30 @@ class MainActivity : ComponentActivity() {
                             page = 6
                         })
                     } else if (page == 6) {
-                        PremiumSpotifyWebScreen(this@MainActivity, pendingSpotifyPremium,
+                        SpotifyPremiumHostScreen(this@MainActivity, pendingSpotifyPremium,
                             onBack = { page = 3 }, modifier = Modifier.weight(1f))
+                    } else if (page == 8 && pendingYouTube != null) {
+                        YouTubePlayerScreen(this@MainActivity, pendingYouTube!!,
+                            onBack = { pendingYouTube = null; page = 7 },
+                            modifier = Modifier.weight(1f))
+                    } else if (page == 7) {
+                        YouTubeLibraryScreen(this@MainActivity, incomingYouTubeUrl,
+                            consumeShare = { incomingYouTubeUrl = null },
+                            onPlay = playExternal,
+                            onAddToPlaylist = { pendingExternal = it },
+                            modifier = Modifier.weight(1f))
+                        NavigationBar(containerColor = panel) {
+                            listOf(
+                                Triple("Müzik", Icons.Rounded.Album, 5),
+                                Triple("YouTube", Icons.Rounded.SmartDisplay, 7),
+                                Triple("Radyo", Icons.Rounded.Radio, 4),
+                                Triple("Yerel", Icons.Rounded.Home, 0),
+                                Triple("Kitaplık", Icons.Rounded.LibraryMusic, 2)
+                            ).forEach { (label, icon, n) ->
+                                NavigationBarItem(selected = page == n, onClick = { page = n },
+                                    icon = { Icon(icon, null) }, label = { Text(label) })
+                            }
+                        }
                     } else if (page == 4 || page == 5) {
                         if (page == 5) {
                             AudiusScreen(this@MainActivity, startAudius, Modifier.weight(1f),
@@ -223,6 +271,7 @@ class MainActivity : ComponentActivity() {
                         NavigationBar(containerColor = panel) {
                             listOf(
                                 Triple("Müzik", Icons.Rounded.Album, 5),
+                                Triple("YouTube", Icons.Rounded.SmartDisplay, 7),
                                 Triple("Radyo", Icons.Rounded.Radio, 4),
                                 Triple("Yerel", Icons.Rounded.Home, 0),
                                 Triple("Ara", Icons.Rounded.Search, 1),
@@ -329,7 +378,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     NavigationBar(containerColor = panel) {
-                        listOf(Triple("Müzik", Icons.Rounded.Album, 5), Triple("Radyo", Icons.Rounded.Radio, 4), Triple("Yerel", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
+                        listOf(Triple("Müzik", Icons.Rounded.Album, 5), Triple("YouTube", Icons.Rounded.SmartDisplay, 7), Triple("Radyo", Icons.Rounded.Radio, 4), Triple("Yerel", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
                             NavigationBarItem(selected = page == n, onClick = { page = n }, icon = { Icon(icon, null) }, label = { Text(label) })
                         }
                     }

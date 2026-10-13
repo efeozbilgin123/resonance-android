@@ -58,6 +58,7 @@ fun HybridSpotifyPlaylists(
     var pendingSpotify by remember { mutableStateOf<SpotifyTrack?>(null) }
     var matching by remember { mutableStateOf<SpotifyTrack?>(null) }
     var pendingExternal by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
+    var addingYouTubeToList by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var reload by remember { mutableIntStateOf(0) }
@@ -345,10 +346,18 @@ fun HybridSpotifyPlaylists(
                         }
                     }
                     item {
+                        Button(onClick = { addingYouTubeToList = true },
+                            modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Rounded.SmartDisplay, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("YouTube / YouTube Music bağlantısı ekle")
+                        }
+                    }
+                    item {
                         Spacer(Modifier.height(12.dp))
                         Text("Resonance ekleri — yalnız bu cihazda", color = resonanceAccent,
                             fontWeight = FontWeight.Bold)
-                        Text("Audius veya yerel parçalar Spotify hesabına gönderilmez. Bu bölüm sadece Resonance'ta oynatılır.",
+                        Text("YouTube, Audius veya yerel parçalar Spotify hesabına gönderilmez. Videolar resmî YouTube oynatıcısında açılır.",
                             color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
                     }
                     if (externalRows.isEmpty()) {
@@ -391,6 +400,23 @@ fun HybridSpotifyPlaylists(
                 selected = null
             }, enabled = !busy) { Text("Spotify izinlerini yenile / hesap değiştir") }
         }
+    }
+    if (addingYouTubeToList) {
+        YouTubeImportDialog(initialUrl = "",
+            onSave = { video ->
+                val list = selected
+                if (list == null || accountId.isBlank()) {
+                    message = "Önce Spotify çalma listeni seç."
+                } else {
+                    val added = local.add(accountId, list.id, video.asExternal())
+                    externalRows = local.entries(accountId, list.id)
+                    message = if (added) "YouTube bağlantısı Resonance'a kaydedildi (Spotify sunucusuna değil)."
+                        else "YouTube videosu bu listede zaten var."
+                }
+                addingYouTubeToList = false
+            },
+            onDismiss = { addingYouTubeToList = false }
+        )
     }
     matching?.let { track ->
         SourceMatchDialog(

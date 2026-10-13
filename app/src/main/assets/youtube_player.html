@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="tr"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Resonance YouTube</title>
+<style>html,body {margin:0;width:100%;height:100%;background:#000;color:#fff}
+#frame{position:absolute;inset:0;width:100%;height:100%;border:0}
+#problem{font:13px system-ui; padding:22px;display:none}</style>
+</head><body>
+<div id="problem">Geçersiz YouTube bağlantısı.</div>
+<script>
+"use strict";
+const videoId = new URLSearchParams(location.search).get("v") || "";
+if (/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+  const frame = document.createElement("iframe");
+  frame.id="frame";
+  frame.title="YouTube video oynatıcı";
+  frame.referrerPolicy="strict-origin-when-cross-origin";
+  frame.allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen";
+  frame.allowFullscreen=true;
+  frame.src="https://www.youtube-nocookie.com/embed/"+encodeURIComponent(videoId)+
+    "?playsinline=1&rel=0&origin="+encodeURIComponent(location.origin);
+  document.body.appendChild(frame);
+} else {
+  document.getElementById("problem").style.display="block";
+}
+</script>
+</body></html>
