@@ -81,6 +81,60 @@ class HybridPlaylistStore(context: Context) {
         previous.add(to, moving)
         save(accountId, playlistId, previous)
     }
+    /**
+     * Portable backup for user-chosen cloud/file storage, NOT Spotify synchronization.
+     * Local content:// URIs in exported entries are device-specific.
+     */
+    @Synchronized
+    fun exportAccount(accountId: String): String {
+        require(accountId.isNotBlank())
+        val prefix = "account:" + accountId + ":playlist:"
+        val lists = JSONArray()
+        for ((name, value) in prefs.all) {
+            if (!name.startsWith(prefix) || value !is String) continue
+            val playlistId = name.removePrefix(prefix)
+            if (!playlistId.matches(Regex("[A-Za-z0-9]+"))) continue
+            val items = JSONArray()
+            entries(accountId, playlistId).forEach { items.put(it.json()) }
+            lists.put(JSONObject().put("playlistId", playlistId).put("entries", items))
+        }
+        return JSONObject().put("format", "resonance-sidecar-v1")
+            .put("accountId", accountId).put("playlists", lists).toString(2)
+    }
+
+    /**
+     * Merges entries for the same Spotify account, deduplicating by source + ID.
+     * Does not import or modify any Spotify playlist server-side.
+     */
+    @Synchronized
+    fun importAccount(accountId: String, data: String): Int {
+        require(data.length < 2_000_000) { "Yedek dosyası fazla büyük" }
+        val root = JSONObject(data)
+        require(root.optString("format") == "resonance-sidecar-v1") {
+            "Bu bir Resonance liste yedeği değil"
+        }
+        require(root.optString("accountId") == accountId && accountId.isNotBlank()) {
+            "Yedek başka bir Spotify hesabına ait"
+        }
+        val lists = root.getJSONArray("playlists")
+        require(lists.length() <= 2000) { "Çok fazla liste var" }
+        var imported = 0
+        for (i in 0 until lists.length()) {
+            val list = lists.getJSONObject(i)
+            val playlistId = list.getString("playlistId")
+            require(playlistId.matches(Regex("[A-Za-z0-9]+"))) {
+                "Yedekte geçersiz Spotify liste kimliği"
+            }
+            val items = list.getJSONArray("entries")
+            require(items.length() <= 10000) { "Çok fazla parça var" }
+            for (n in 0 until items.length()) {
+                val item = ExternalPlaylistItem.fromJson(items.getJSONObject(n))
+                if (add(accountId, playlistId, item)) imported++
+            }
+        }
+        return imported
+    }
+
     private fun save(accountId: String, playlistId: String, entries: List<ExternalPlaylistItem>) {
         val array = JSONArray()
         entries.forEach { array.put(it.json()) }
