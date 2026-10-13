@@ -27,7 +27,8 @@ import java.util.Base64
 data class SpotifyPlaylist(val id: String, val name: String, val editable: Boolean)
 
 data class SpotifyTrack(
-    val uri: String, val title: String, val artist: String, val local: Boolean
+    val uri: String, val title: String, val artist: String, val local: Boolean,
+    val durationSeconds: Int = 0
 )
 
 class SpotifyClient(private val activity: Activity) {
@@ -185,7 +186,7 @@ class SpotifyClient(private val activity: Activity) {
                 val uri = track.optString("uri")
                 val isLocal = item.optBoolean("is_local") || track.optBoolean("is_local")
                 result += SpotifyTrack(uri, track.optString("name").ifBlank { "Adsız şarkı" },
-                    artist, isLocal)
+                    artist, isLocal, track.optInt("duration_ms") / 1000)
             }
             if (arr.length() < 50) break
             offset += arr.length()
