@@ -53,6 +53,8 @@ fun HybridSpotifyPlaylists(
     var search by remember { mutableStateOf("") }
     var playlistName by remember { mutableStateOf("") }
     var pendingSpotify by remember { mutableStateOf<SpotifyTrack?>(null) }
+    var matching by remember { mutableStateOf<SpotifyTrack?>(null) }
+    var pendingExternal by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var reload by remember { mutableIntStateOf(0) }
@@ -179,7 +181,8 @@ fun HybridSpotifyPlaylists(
                                 val uri = item.optString("uri")
                                 if (!uri.startsWith("spotify:track:")) return@mapNotNull null
                                 SpotifyTrack(uri, item.optString("name"),
-                                    item.optJSONArray("artists")?.optJSONObject(0)?.optString("name") ?: "", false)
+                                    item.optJSONArray("artists")?.optJSONObject(0)?.optString("name") ?: "",
+                                    false, item.optInt("duration_ms") / 1000)
                             }
                         }
                     }) { Text("Ara") }
@@ -233,6 +236,10 @@ fun HybridSpotifyPlaylists(
                                     Text("Spotify'da aç")
                                 }
                             }
+                            IconButton(onClick = { matching = track }) {
+                                Icon(Icons.Rounded.Search,
+                                    "Audius'ta benzer kayıtları ara", tint = resonanceAccent)
+                            }
                             IconButton(onClick = { pendingSpotify = track }) {
                                 Icon(Icons.Rounded.PlaylistAdd,
                                     "Gerçek Spotify listesine kaydet", tint = resonanceAccent)
@@ -273,6 +280,10 @@ fun HybridSpotifyPlaylists(
                                     overflow = TextOverflow.Ellipsis)
                                 Text(track.artist, color = Color.LightGray,
                                     style = MaterialTheme.typography.bodySmall)
+                            }
+                            IconButton(onClick = { matching = track }) {
+                                Icon(Icons.Rounded.Search,
+                                    "Audius'ta benzer kayıtları ara", tint = resonanceAccent)
                             }
                             IconButton(onClick = { playOnSpotify(track) }, enabled = !busy) {
                                 Icon(Icons.Rounded.PlayArrow,
@@ -331,6 +342,20 @@ fun HybridSpotifyPlaylists(
                 selected = null
             }, enabled = !busy) { Text("Spotify izinlerini yenile / hesap değiştir") }
         }
+    }
+    matching?.let { track ->
+        SourceMatchDialog(
+            original = track,
+            onPlay = onExternalPlay,
+            onAdd = { pendingExternal = it },
+            onDismiss = { matching = null }
+        )
+    }
+    pendingExternal?.let { entry ->
+        SpotifyPlaylistPicker(activity, external = entry, onDismiss = {
+            pendingExternal = null
+            reload++
+        })
     }
     pendingSpotify?.let { track ->
         SpotifyPlaylistPicker(activity, spotifyTrack = track, onDismiss = {
