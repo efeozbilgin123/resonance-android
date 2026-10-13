@@ -2,7 +2,13 @@ package com.resonance.player
 
 import android.content.Context
 import android.media.MediaMetadataRetriever
-import android.media.MediaPlayer
+import androidx.media3.common.MediaItem
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import androidx.concurrent.futures.CallbackToFutureAdapter
+import com.google.common.util.concurrent.MoreExecutors
+import androidx.core.content.ContextCompat
+import android.content.ComponentName
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -33,10 +39,13 @@ private val muted = Color(0xFF9BA39B)
 private data class Song(val uri: Uri, val title: String, val artist: String)
 
 class MainActivity : ComponentActivity() {
-    private var player: MediaPlayer? = null
+    private var controller: MediaController? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
+        val future = MediaController.Builder(this, token).buildAsync()
+        future.addListener({ runCatching { controller = future.get() } }, ContextCompat.getMainExecutor(this))
         val storage = getSharedPreferences("tracks", Context.MODE_PRIVATE)
         setContent {
             var songs by remember {
@@ -58,13 +67,10 @@ class MainActivity : ComponentActivity() {
             }
             val startSong: (Song) -> Unit = { track ->
                 runCatching {
-                    player?.release()
-                    player = MediaPlayer().apply {
-                        setDataSource(this@MainActivity, track.uri)
-                        setOnPreparedListener { it.start(); playing = true }
-                        setOnCompletionListener { playing = false }
-                        prepareAsync()
-                    }
+                    val active = controller ?: error("Oynatıcı henüz hazır değil")
+                    active.setMediaItem(MediaItem.fromUri(track.uri))
+                    active.prepare()
+                    active.play()
                     selected = track
                     playing = false
                     error = null
@@ -149,7 +155,7 @@ class MainActivity : ComponentActivity() {
                                 }
                                 IconButton(onClick = {
                                     runCatching {
-                                        player?.let { if (it.isPlaying) it.pause() else it.start(); playing = it.isPlaying }
+                                        controller?.let { if (it.isPlaying) it.pause() else it.play(); playing = it.isPlaying }
                                     }.onFailure { error = it.localizedMessage }
                                 }) { Icon(if(playing) Icons.Rounded.PauseCircleFilled else Icons.Rounded.PlayCircleFilled, null, tint = lime) }
                             }
@@ -178,5 +184,5 @@ class MainActivity : ComponentActivity() {
         }
         return Song(uri, title, artist)
     }
-    override fun onDestroy() { player?.release(); super.onDestroy() }
+    override fun onDestroy() { controller?.release(); super.onDestroy() }
 }
