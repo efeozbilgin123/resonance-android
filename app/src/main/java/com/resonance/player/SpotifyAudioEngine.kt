@@ -140,7 +140,8 @@ object SpotifyAudioEngine {
             5 -> { playing = false; onUnavailable?.invoke() }
             6 -> { playing = false; ready = false; connecting = false }
             7 -> positionMs = millis
+            8 -> { connecting = false; ready = false; playing = false }
         }
-        if (code in 1..6) SpotifyPlaybackService.refresh()
+        if (code in 1..6 || code == 8) SpotifyPlaybackService.refresh()
     }
 }
