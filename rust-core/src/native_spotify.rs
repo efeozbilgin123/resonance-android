@@ -5,6 +5,7 @@
 //! Important: integration is experimental until tested on a Premium device.
 
 use std::path::PathBuf;
+use std::time::Duration;
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread;
 
@@ -71,6 +72,15 @@ impl AndroidEmitter {
                     &[JValue::Object(&obj)],
                 );
             }
+        }
+    }
+
+    fn event(&self, code: i32, position: i32) {
+        if let Ok(mut env) = self.vm.attach_current_thread() {
+            let _ = env.call_method(
+                self.output.as_obj(), "onEngineEvent", "(II)V",
+                &[JValue::Int(code), JValue::Int(position)],
+            );
         }
     }
 
@@ -217,6 +227,7 @@ fn run_engine(
     let audio_emitter = emitter.clone();
     let playback_config = PlayerConfig {
         bitrate: Bitrate::Bitrate320,
+        position_update_interval: Some(Duration::from_secs(1)),
         ..PlayerConfig::default()
     };
     let player = {
@@ -247,6 +258,7 @@ fn run_engine(
             }
         }
     });
+    emitter.event(1, 0);
     emitter.status("Spotify Premium bağlantısı hazır. Parçayı çalabilirsin.");
 
     for command in receiver {
