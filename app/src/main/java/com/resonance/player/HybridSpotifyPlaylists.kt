@@ -38,6 +38,7 @@ private val resonancePanel = Color(0xFF171D19)
 fun HybridSpotifyPlaylists(
     activity: Activity,
     onExternalPlay: (ExternalPlaylistItem) -> Unit,
+    onPremiumPlay: (SpotifyTrack) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val client = remember { SpotifyClient(activity) }
@@ -276,8 +277,8 @@ fun HybridSpotifyPlaylists(
                                     overflow = TextOverflow.Ellipsis)
                                 Text(track.artist, color = Color.LightGray,
                                     style = MaterialTheme.typography.bodySmall)
-                                TextButton(onClick = { showSpotifyLink(track) }) {
-                                    Text("Spotify'da aç")
+                                TextButton(onClick = { onPremiumPlay(track) }) {
+                                    Text("Premium çal")
                                 }
                             }
                             IconButton(onClick = { matching = track }) {
@@ -329,8 +330,12 @@ fun HybridSpotifyPlaylists(
                                 Icon(Icons.Rounded.Search,
                                     "Audius'ta benzer kayıtları ara", tint = resonanceAccent)
                             }
+                            IconButton(onClick = { onPremiumPlay(track) }) {
+                                Icon(Icons.Rounded.Headphones,
+                                    "Resonance Premium SDK'da çalmayı dene", tint = resonanceAccent)
+                            }
                             IconButton(onClick = { playOnSpotify(track) }, enabled = !busy) {
-                                Icon(Icons.Rounded.PlayArrow,
+                                Icon(Icons.Rounded.Cast,
                                     "Spotify Connect'te çal", tint = resonanceAccent)
                             }
                             IconButton(onClick = { showSpotifyLink(track) }) {
