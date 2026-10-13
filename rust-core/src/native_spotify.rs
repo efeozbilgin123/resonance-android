@@ -20,7 +20,7 @@ use librespot_playback::{
     convert::Converter,
     decoder::AudioPacket,
     mixer::NoOpVolume,
-    player::Player,
+    player::{Player, PlayerEvent},
 };
 
 enum EngineCommand {
@@ -228,6 +228,25 @@ fn run_engine(
             move || Box::new(AndroidPcmSink { emitter: audio_emitter }),
         )
     };
+    let mut player_events = player.get_player_event_channel();
+    let event_emitter = emitter.clone();
+    runtime.spawn(async move {
+        while let Some(event) = player_events.recv().await {
+            match event {
+                PlayerEvent::Playing { .. } =>
+                    event_emitter.status("Spotify'dan ses çalıyor."),
+                PlayerEvent::Paused { .. } =>
+                    event_emitter.status("Spotify parçası duraklatıldı."),
+                PlayerEvent::Unavailable { .. } =>
+                    event_emitter.status("Spotify bu kaydı açamadı. Premium ve parça erişimini kontrol et."),
+                PlayerEvent::EndOfTrack { .. } =>
+                    event_emitter.status("Spotify parçası tamamlandı."),
+                PlayerEvent::SessionDisconnected { .. } =>
+                    event_emitter.status("Spotify bağlantısı kesildi."),
+                _ => {}
+            }
+        }
+    });
     emitter.status("Spotify Premium bağlantısı hazır. Parçayı çalabilirsin.");
 
     for command in receiver {
