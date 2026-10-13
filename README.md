@@ -1,116 +1,86 @@
-# Resonance Android v0.6 (beta)
+# Resonance Android v0.7 — unified music search (beta)
 
-Independent Android audio player in Kotlin / Jetpack Compose, Media3, and Rust JNI.
+Resonance is a Kotlin/Jetpack Compose Android music player with a Rust
+librespot Premium engine, Media3/ExoPlayer playback and optional Spotify Web API
+metadata/playlist support.
 
-> **Not a full Spotify replacement.** Spotify does not expose arbitrary master
-> audio streams to independent Android apps. Spotify Free cannot be made to
-> stream Spotify's full catalogue through the Web API. The official Spotify
-> Web Playback SDK requires Premium and compatible DRM-enabled browser support.
-> Third-party clients that mimic Spotify and combine its content with another
-> service can violate the Spotify Developer Policy.
+## One search, multiple independent sources
 
-## Supported functionality
+The **Ara** tab is now the main screen. Start typing an artist or song title:
+Spotify (if logged in), YouTube Music-style music results and Audius appear in
+**one relevance-ranked list**. Each result has a **source label**; similarly
+named tracks from different services are **not silently merged**. Search results
+are progressive; one slow/offline provider should not hide the others.
 
-- **YouTube/YouTube Music links:** Paste video links or share videos via Android's
-  Share -> Resonance menu. Resolves public video titles via YouTube oEmbed,
-  persists a local YouTube library, and attaches links as *Resonance-only*
-  entries to Spotify-linked playlists. Playback uses YouTube's official
-  embeddable video player within WebView (visible video + original controls),
-  **not extracted audio**, and is not guaranteed to continue in the background.\n- **Independent music:** Browse, search, and play on-demand tracks from
-  [Audius](https://docs.audius.co/api/), with artwork and favorites.
-- **Radio:** Browse free live radio stations via Radio Browser, with favorites.
-- **Local files:** Import permitted audio using the Android storage picker.
-- **Spotify account (optional):** PKCE OAuth using your own Client ID;
-  read your playlists, browse Spotify songs, create Spotify playlists,
-  **add Spotify catalogue tracks** to editable Spotify playlists. Those
-  Spotify catalogue additions **are persisted to your Spotify account**.
-- **Linked external extras:** Attach YouTube, Audius or local songs to a Spotify playlist
-  in a **separate local section** of Resonance. These entries **are not
-  stored on Spotify servers** and **will not appear in the Spotify client**.
-  Every entry is keyed to a specific Spotify account and playlist ID.
-- **Spotube-inspired discovery:** On demand, display possible Audius versions
-  for a Spotify song using title, performer, duration. Candidate matching is
-  heuristic, may be wrong, never auto-plays, and the user chooses the external
-  audio source. Spotify audio is never extracted by this mechanism.
-- **Portable sidecar backups:** Export/import the on-device external playlist
-  extras in JSON. Backup contains playlist metadata, not Spotify credentials.
-  Local file URIs are **not portable** to another phone.
-- **Spotify Premium audio (experimental, ARM64):** Rust **librespot-core 0.8.0**
-  and **librespot-playback 0.8.0** plus a JNI sink stream PCM through Android
-  AudioTrack at 44.1 kHz stereo, 16-bit. The player authenticates with an
-  OAuth token issued to the user's connected Spotify Developer app. Native
-  playback is the default Premium tab and DOES NOT require installing Spotify.
-  Unlike Spotifast on desktop, this Android implementation is not yet a
-  Spotify Connect receiver, and media-session/background/headset controls for
-  native Spotify playback need separate integration. A Premium account is
-  required; runtime login and decoding have **not been tested on a real account**.\n- **Spotify Web SDK fallback (experimental):** Embedded official Web Playback SDK
-  served from a trusted local HTTPS WebViewAssetLoader origin. This *might not
-  work* on Android WebView if EME DRM is unavailable. There is a button to
-  open the **official Spotify Web Player in a supported Android browser**.
-  No Spotify app is needed for the browser route. The older Spotify Connect
-  control is also provided but requires an active Spotify playback device.
-- **Android Media3:** Independent audio with background MediaSessionService,
-  headset/lockscreen controls, and Rust queue-policy library.
+The search ranks name and performer matches, boosts exact song titles and
+demotes live/remix/cover versions unless requested. This is a heuristic;
+incorrect or missing matches remain possible.
 
-## Spotify authorization
+### Audio playback
 
-Create your app in [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
-Select Web API and register the *exact* redirect URI:
+- **YouTube Music/YouTube**: Spotube-inspired **unofficial** Piped
+  (`/search?filter=music_songs`, `/streams/:id`) or Invidious
+  (`/api/v1/search`, `/api/v1/videos/:id`) metadata + audio source.
+  Resonance resolves an HTTPS audio URL on demand and streams through
+  **Android Media3/ExoPlayer**, without a video view, browser or MP3 upload.
+  It tries configured servers and can retry a different server on playback
+  errors. Results can include regular YouTube videos when using an
+  Invidious fallback.
+- **Audius**: Official public creator-uploaded catalog and native audio stream.
+- **Spotify Premium**: Optional native Rust **librespot** decoder with a JNI
+  PCM sink into Android AudioTrack. A second official Web Playback SDK option
+  remains as an experimental fallback. This is **not** a finished, tested
+  Spotify Connect replacement.
+- **Spotify Free**: Spotify Web API metadata can be shown when permitted;
+  Spotify audio is **never** streamed from Spotify for Free users.
+  The user can instead choose a separately identified available YouTube
+  or Audius recording.
 
-`http://127.0.0.1:43892/callback`
+The player uses Android Media3 for YouTube/Audius, including native Android
+audio output, background playback, Bluetooth/notification media controls and
+automatic queue progression. YouTube source URLs expire; only stable video IDs
+are kept in local playlists and URLs are re-resolved for playback.
 
-Enter the Client ID in Resonance > Spotify. New playlist modification and Web
-Playback SDK features need additional OAuth scopes:
-`playlist-modify-public`, `playlist-modify-private`, `streaming`.
-**Use Spotify izinlerini yenile / hesap değiştir** to sign in again and
-authorize any newly requested scopes. Developer Mode permissions, approved
-users, subscriptions, markets and API access restrictions still apply.
+**YouTube is not officially supported for this third-party audio-only use.**
+There is no official YouTube Music public raw-audio streaming API for such a
+client. Piped/Invidious services can go offline, return 403 responses, serve
+incorrect results, or fail in some countries. Audio-only/background playback
+may violate YouTube terms. Resonance does not claim YouTube authorization or
+guaranteed availability. It does not bypass DRM, logins or memberships.
+The gear icon in the search screen permits choosing a custom HTTPS API server.
 
-## Important Spotify limitation
+## Playlists
 
-Spotify's official API accepts Spotify track/episode URIs for playlist insertion
-and **cannot add local or Audius files as real Spotify playlist items**.
-Spotify Desktop can add local files manually in its own UI, but this is not
-supported as a playlist-insertion operation by the Web API.
-Resonance NEVER marks locally attached audio as synced to Spotify.
+Use **+** next to any search result:
+- A real **Spotify track** is written to an editable Spotify playlist via the
+  official Spotify Web API, so it appears in the Spotify app too.
+- A **YouTube or Audius track** is attached to the same Spotify-linked list
+  **locally in Resonance**. It will **not** appear in Spotify or be uploaded
+  to Spotify's server, since the official Spotify playlist API cannot accept
+  arbitrary external audio. It will stream again when played.
+- JSON export/import saves the local sidecar playlist entries for a specific
+  Spotify account. Local Android file URIs aren't portable between devices.
 
-Spotify also prohibits unauthorized Spotify core-app clones and integration
-with other services under its [Developer Policy](https://developer.spotify.com/policy).
-Permission from Spotify may be necessary for broader deployment of the
-metadata matching and multi-source use cases.
+Spotify OAuth uses a **user-created Client ID** and the redirect
+`http://127.0.0.1:43892/callback`. Developer Mode access/allowlists,
+permissions and quotas still apply.
 
-## Build an APK
+## Build and limitations
 
-CI compiles Rust JNI shared libraries for arm64-v8a, armeabi-v7a and x86_64,
-runs Rust tests and Kotlin unit tests, then builds `app-debug.apk`.
+The GitHub Actions `Build Resonance Android APK` workflow compiles the
+Android ARM64 Rust JNI shared library, runs Rust and Android unit tests,
+and packages a debug APK.
 
-Check [GitHub Actions](../../actions) and select a successful
-**Build Resonance Android APK**
-run. Download its artifact ZIP and extract `app-debug.apk`.
+To build locally use an Android SDK, NDK 27.2.12479018, Java 17, Rust with
+`aarch64-linux-android` and Gradle. The resulting `app-debug.apk` is a
+debug-signed application, not a Play Store release.
 
-Debug builds are not production-signed Google Play releases. Compilation success
-does not establish real-device audio/DRM/OAuth success.
+The following require real-device testing: Spotify Premium playback/login,
+live YouTube/Piped/Invidious streams and background networking. A successful
+build does not prove that a specific audio provider currently works.
 
-## Device test steps for v0.6
-
-1. Install the ARM64 debug APK. If an old debug APK is signed with a different
-   key, back up any local Resonance favorites before uninstalling it.
-2. In the YouTube tab paste `https://youtu.be/dQw4w9WgXcQ`, save it and open
-   the video. On YouTube, video availability and embedded-playback restrictions
-   may vary by account and location.
-3. Connect a Spotify account via your registered Client ID and redirect URI.
-   If upgrading from earlier versions, reconnect to grant the `streaming` scope.
-4. Open a Spotify playlist; choose **YouTube / YouTube Music bağlantısı ekle**,
-   paste a link and confirm. The YouTube entry appears only in Resonance's
-   local extras section, not in the Spotify app.
-5. On a Premium account select a real Spotify catalog track, choose **Premium
-   çal**, then **Rust · librespot**, connect and play. Observe any login/decoder
-   error. This feature remains experimental until tested with real Premium credentials.
-6. If Rust login/playback fails, use the **Web SDK yedek** tab. The fallback
-   also needs Premium and might fail on Android WebView DRM.
-
-The APK contains native ARM64 code and is not currently packaged for 32-bit
-Android or x86 Android emulators. The SDK/YouTube/Spotify network services and
-third-party policies can change. Spotify's Developer Policy limits Spotify
-clones and integration with other content services, and publishing this app
-may require Spotify's permission.
+Spotify's developer platform rules restrict unauthorized clone clients and
+integrations with third-party music services; you may need Spotify's
+permission for broader distribution. Respect each source's licensing and
+terms. The original YouTube video embed/player and manual import UI from
+v0.6 were intentionally removed in v0.7.

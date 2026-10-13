@@ -35,6 +35,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val lime = Color(0xFFC6F17B)
 private val bg = Color(0xFF080B0A)
@@ -75,9 +78,9 @@ class MainActivity : ComponentActivity() {
             }
             var selected by remember { mutableStateOf<Song?>(null) }
             var playing by remember { mutableStateOf(false) }
-            var page by remember { mutableStateOf(if (incomingYouTubeUrl != null) 7 else 5) }
+            var page by remember { mutableStateOf(1) }
             LaunchedEffect(incomingYouTubeUrl) {
-                if (incomingYouTubeUrl != null) page = 7
+                if (incomingYouTubeUrl != null) page = 1
             }
             var controllerReady by remember { mutableStateOf(false) }
             var repeatMode by remember { mutableIntStateOf(0) }
@@ -90,6 +93,15 @@ class MainActivity : ComponentActivity() {
             var pendingExternal by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
             var pendingSpotifyPremium by remember { mutableStateOf<SpotifyTrack?>(null) }
             var pendingYouTube by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
+            var pendingAddSpotify by remember { mutableStateOf<SpotifyTrack?>(null) }
+            var unifiedQueue by remember { mutableStateOf<List<UnifiedSong>>(emptyList()) }
+            var unifiedQueueIndex by remember { mutableIntStateOf(-1) }
+            var streamRequest by remember { mutableIntStateOf(0) }
+            var activeUnified by remember { mutableStateOf<UnifiedSong?>(null) }
+            var audioRetryUsed by remember { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
+            val unifiedCatalog = remember { UnifiedMusicCatalog(this@MainActivity,
+                SpotifyClient(this@MainActivity)) }
             DisposableEffect(Unit) {
                 val listener = object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
@@ -101,8 +113,41 @@ class MainActivity : ComponentActivity() {
                             item.mediaMetadata.artist?.toString() ?: "Resonance")
                     }
                     override fun onPlayerError(playerError: PlaybackException) {
-                        error = "Ses kaynağı açılamadı: ${playerError.localizedMessage}"
-                        playing = false
+                        val track = activeUnified
+                        if (track?.source == MusicOrigin.YOUTUBE_MUSIC &&
+                            !audioRetryUsed) {
+                            audioRetryUsed = true
+                            error = "YouTube ses kaynağı değiştiriliyor..."
+                            val seq = streamRequest
+                            scope.launch {
+                                try {
+                                    val fresh = withContext(Dispatchers.IO) {
+                                        unifiedCatalog.invalidateStream(track)
+                                        unifiedCatalog.audioStream(track)
+                                    }
+                                    if (seq == streamRequest) {
+                                        val active = controller ?: kotlin.error("Oynatıcı hazır değil")
+                                        active.setMediaItem(MediaItem.Builder().setUri(fresh.url)
+                                            .setMimeType(fresh.mimeType)
+                                            .setMediaId(track.stableKey)
+                                            .setMediaMetadata(MediaMetadata.Builder()
+                                                .setTitle(track.title).setArtist(track.artist)
+                                                .build()).build())
+                                        active.prepare()
+                                        active.play()
+                                        error = null
+                                    }
+                                } catch (e: Exception) {
+                                    if (seq == streamRequest) {
+                                        error = "YouTube kaynakları kullanılamıyor: ${e.localizedMessage}"
+                                        playing = false
+                                    }
+                                }
+                            }
+                        } else {
+                            error = "Ses kaynağı açılamadı: ${playerError.localizedMessage}"
+                            playing = false
+                        }
                     }
                 }
                 var registered = false
@@ -127,6 +172,9 @@ class MainActivity : ComponentActivity() {
                 storage.edit().putStringSet("uris", songs.map { it.uri.toString() }.toSet()).apply()
             }
             val startSong: (Song) -> Unit = { track ->
+                activeUnified = null
+                unifiedQueue = emptyList()
+                unifiedQueueIndex = -1
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     active.setMediaItem(MediaItem.Builder().setUri(track.uri).setMediaMetadata(
@@ -140,6 +188,9 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val startRadio: (RadioStation) -> Unit = { station ->
+                activeUnified = null
+                unifiedQueue = emptyList()
+                unifiedQueueIndex = -1
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     val item = MediaItem.Builder().setUri(station.stream)
@@ -156,6 +207,9 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val startAudius: (AudiusTrack, List<AudiusTrack>) -> Unit = { track, tracks ->
+                activeUnified = null
+                unifiedQueue = emptyList()
+                unifiedQueueIndex = -1
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     val playable = tracks.map { candidate ->
@@ -176,11 +230,88 @@ class MainActivity : ComponentActivity() {
                     error = null
                 }.onFailure { error = it.localizedMessage }
             }
+            val launchUnifiedAudio: (UnifiedSong) -> Unit = { track ->
+                if (track.source == MusicOrigin.SPOTIFY) {
+                    activeUnified = null
+                    unifiedQueue = emptyList()
+                    unifiedQueueIndex = -1
+                    controller?.pause()
+                    pendingSpotifyPremium = track.spotifyTrack()
+                    page = 6
+                } else {
+                    activeUnified = track
+                    audioRetryUsed = false
+                    val seq = ++streamRequest
+                    controller?.pause()
+                    error = null
+                    scope.launch {
+                        try {
+                            val stream = withContext(Dispatchers.IO) {
+                                unifiedCatalog.audioStream(track)
+                            }
+                            if (seq == streamRequest) {
+                                val active = controller ?: error("Oynatıcı henüz hazır değil")
+                                val item = MediaItem.Builder().setUri(stream.url)
+                                    .setMimeType(stream.mimeType)
+                                    .setMediaId(track.stableKey)
+                                    .setMediaMetadata(MediaMetadata.Builder()
+                                        .setTitle(track.title).setArtist(track.artist)
+                                        .build())
+                                    .build()
+                                active.setMediaItem(item)
+                                active.prepare()
+                                active.play()
+                                selected = Song(Uri.parse(stream.url), track.title, track.artist)
+                                playing = true
+                            }
+                        } catch (e: Exception) {
+                            if (seq == streamRequest) {
+                                error = "Müzik kaynağı açılamadı: ${e.localizedMessage}"
+                                playing = false
+                            }
+                        }
+                    }
+                }
+            }
+            val playUnified: (UnifiedSong, List<UnifiedSong>) -> Unit = { track, rows ->
+                unifiedQueue = rows.filter { it.source != MusicOrigin.SPOTIFY }
+                unifiedQueueIndex = unifiedQueue.indexOfFirst { it.stableKey == track.stableKey }
+                launchUnifiedAudio(track)
+            }
+            val unifiedNext: () -> Unit = {
+                if (unifiedQueue.isNotEmpty()) {
+                    val n = (unifiedQueueIndex + 1) % unifiedQueue.size
+                    unifiedQueueIndex = n
+                    launchUnifiedAudio(unifiedQueue[n])
+                } else controller?.seekToNextMediaItem()
+            }
+            val unifiedPrevious: () -> Unit = {
+                if (unifiedQueue.isNotEmpty()) {
+                    val n = if (unifiedQueueIndex <= 0) unifiedQueue.lastIndex else
+                        unifiedQueueIndex - 1
+                    unifiedQueueIndex = n
+                    launchUnifiedAudio(unifiedQueue[n])
+                } else controller?.seekToPreviousMediaItem()
+            }
+            // Advance to the next YouTube/Audius stream when playback finishes.
+            DisposableEffect(controllerReady, unifiedQueue, unifiedQueueIndex) {
+                val active = controller
+                val transition = object : Player.Listener {
+                    override fun onPlaybackStateChanged(state: Int) {
+                        if (state == Player.STATE_ENDED &&
+                            unifiedQueueIndex >= 0 &&
+                            unifiedQueueIndex < unifiedQueue.lastIndex) {
+                            unifiedNext()
+                        }
+                    }
+                }
+                active?.addListener(transition)
+                onDispose { active?.removeListener(transition) }
+            }
             val playExternal: (ExternalPlaylistItem) -> Unit = { track ->
                 if (track.source == "youtube") {
-                    controller?.pause()
-                    pendingYouTube = track
-                    page = 8
+                    playUnified(UnifiedSong(track.id, MusicOrigin.YOUTUBE_MUSIC,
+                        track.title, track.artist, cover = track.artwork), emptyList())
                 } else runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     val item = MediaItem.Builder().setUri(track.playbackUri)
@@ -214,20 +345,31 @@ class MainActivity : ComponentActivity() {
                     } else if (page == 6) {
                         SpotifyPremiumHostScreen(this@MainActivity, pendingSpotifyPremium,
                             onBack = { page = 3 }, modifier = Modifier.weight(1f))
-                    } else if (page == 8 && pendingYouTube != null) {
-                        YouTubePlayerScreen(this@MainActivity, pendingYouTube!!,
-                            onBack = { pendingYouTube = null; page = 7 },
-                            modifier = Modifier.weight(1f))
-                    } else if (page == 7) {
-                        YouTubeLibraryScreen(this@MainActivity, incomingYouTubeUrl,
-                            consumeShare = { incomingYouTubeUrl = null },
-                            onPlay = playExternal,
-                            onAddToPlaylist = { pendingExternal = it },
-                            modifier = Modifier.weight(1f))
+                    } else if (page == 1) {
+                        UnifiedSearchScreen(
+                            activity = this@MainActivity,
+                            onPlay = playUnified,
+                            onAdd = { item ->
+                                if (item.source == MusicOrigin.SPOTIFY) {
+                                    pendingAddSpotify = item.spotifyTrack()
+                                } else {
+                                    pendingExternal = item.external()
+                                }
+                            },
+                            playingTitle = selected?.title,
+                            isPlaying = playing,
+                            onToggle = {
+                                controller?.let { if (it.isPlaying) it.pause() else it.play() }
+                            },
+                            onPrevious = unifiedPrevious,
+                            onNext = unifiedNext,
+                            initialLink = incomingYouTubeUrl,
+                            modifier = Modifier.weight(1f)
+                        )
                         NavigationBar(containerColor = panel) {
                             listOf(
+                                Triple("Ara", Icons.Rounded.Search, 1),
                                 Triple("Müzik", Icons.Rounded.Album, 5),
-                                Triple("YouTube", Icons.Rounded.SmartDisplay, 7),
                                 Triple("Radyo", Icons.Rounded.Radio, 4),
                                 Triple("Yerel", Icons.Rounded.Home, 0),
                                 Triple("Kitaplık", Icons.Rounded.LibraryMusic, 2)
@@ -271,7 +413,6 @@ class MainActivity : ComponentActivity() {
                         NavigationBar(containerColor = panel) {
                             listOf(
                                 Triple("Müzik", Icons.Rounded.Album, 5),
-                                Triple("YouTube", Icons.Rounded.SmartDisplay, 7),
                                 Triple("Radyo", Icons.Rounded.Radio, 4),
                                 Triple("Yerel", Icons.Rounded.Home, 0),
                                 Triple("Ara", Icons.Rounded.Search, 1),
@@ -378,7 +519,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     NavigationBar(containerColor = panel) {
-                        listOf(Triple("Müzik", Icons.Rounded.Album, 5), Triple("YouTube", Icons.Rounded.SmartDisplay, 7), Triple("Radyo", Icons.Rounded.Radio, 4), Triple("Yerel", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
+                        listOf(Triple("Müzik", Icons.Rounded.Album, 5), Triple("Radyo", Icons.Rounded.Radio, 4), Triple("Yerel", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
                             NavigationBarItem(selected = page == n, onClick = { page = n }, icon = { Icon(icon, null) }, label = { Text(label) })
                         }
                     }
@@ -387,6 +528,10 @@ class MainActivity : ComponentActivity() {
                 pendingExternal?.let { track ->
                     SpotifyPlaylistPicker(this@MainActivity, external = track,
                         onDismiss = { pendingExternal = null })
+                }
+                pendingAddSpotify?.let { track ->
+                    SpotifyPlaylistPicker(this@MainActivity, spotifyTrack = track,
+                        onDismiss = { pendingAddSpotify = null })
                 }
             }
         }
