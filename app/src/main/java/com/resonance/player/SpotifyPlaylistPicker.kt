@@ -46,7 +46,7 @@ fun SpotifyPlaylistPicker(
         scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    if (!playlist.editable) error("Bu liste düzenlenemez; sana ait veya ortak liste seç.")
+                    if (!playlist.editable) kotlin.error("Bu liste düzenlenemez; sana ait veya ortak liste seç.")
                     if (external != null) {
                         if (store.add(accountId, playlist.id, external))
                             "Resonance eklerine kaydedildi (yalnızca bu cihazda; Spotify'a gönderilmedi)."
