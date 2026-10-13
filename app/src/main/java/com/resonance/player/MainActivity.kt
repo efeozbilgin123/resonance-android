@@ -383,7 +383,7 @@ class MainActivity : ComponentActivity() {
                                 Icon(Icons.Rounded.QueueMusic, "Oynatıcı ve sıra", tint = lime)
                             }
                         }
-                        TextButton(onClick = { page = if (page == 3) 1 else 3 }) { Text(if (page == 3) "Geri" else "Spotify hesabı", color = lime) }
+                        TextButton(onClick = { page = if (page == 2 || page == 3) 1 else 2 }) { Text(if (page == 2 || page == 3) "Ara" else "Kitaplık", color = lime) }
                         IconButton(onClick = { picker.launch(arrayOf("audio/*")) }) {
                             Icon(Icons.Rounded.LibraryAdd, contentDescription = "Müzik içe aktar", tint = lime)
                         }
@@ -428,12 +428,27 @@ class MainActivity : ComponentActivity() {
                             },
                             modifier = Modifier.weight(1f)
                         )
-                    } else if (page == 3) {
-                        SpotifyScreen(this@MainActivity, playExternal, onPremiumPlay = { track ->
-                            val item = UnifiedSong(track.uri, MusicOrigin.SPOTIFY,
-                                track.title, track.artist, track.durationSeconds)
-                            playUnified(item, listOf(item))
-                        }, onPlayQueue = playUnified)
+                    } else if (page == 2 || page == 3) {
+                        Box(Modifier.weight(1f)) {
+                            SpotifyScreen(this@MainActivity, playExternal, onPremiumPlay = { track ->
+                                val item = UnifiedSong(track.uri, MusicOrigin.SPOTIFY,
+                                    track.title, track.artist, track.durationSeconds, track.cover)
+                                playUnified(item, listOf(item))
+                            }, onPlayQueue = playUnified)
+                        }
+                        NavigationBar(containerColor = panel) {
+                            listOf(
+                                Triple("Ara", Icons.Rounded.Search, 1),
+                                Triple("Müzik", Icons.Rounded.Album, 5),
+                                Triple("Radyo", Icons.Rounded.Radio, 4),
+                                Triple("Yerel", Icons.Rounded.Home, 0),
+                                Triple("Kitaplık", Icons.Rounded.LibraryMusic, 2)
+                            ).forEach { (label, icon, n) ->
+                                NavigationBarItem(selected = page == n,
+                                    onClick = { page = n }, icon = { Icon(icon, null) },
+                                    label = { Text(label) })
+                            }
+                        }
                     } else if (page == 6) {
                         SpotifyPremiumHostScreen(this@MainActivity, pendingSpotifyPremium,
                             onBack = { page = 1 }, modifier = Modifier.weight(1f))
