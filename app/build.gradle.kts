@@ -20,6 +20,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
+    implementation("androidx.webkit:webkit:1.14.0")
     testImplementation("junit:junit:4.13.2")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.concurrent:concurrent-futures:1.2.0")
