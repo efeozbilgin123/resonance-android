@@ -1,4 +1,4 @@
-# Resonance Android v0.7 — unified music search (beta)
+# Resonance Android v0.7.1 — unified music search (beta)
 
 Resonance is a Kotlin/Jetpack Compose Android music player with a Rust
 librespot Premium engine, Media3/ExoPlayer playback and optional Spotify Web API
@@ -18,8 +18,11 @@ incorrect or missing matches remain possible.
 
 ### Audio playback
 
-- **YouTube Music/YouTube**: Spotube-inspired **unofficial** Piped
-  (`/search?filter=music_songs`, `/streams/:id`) or Invidious
+- **YouTube Music/YouTube**: Spotube-inspired **unofficial** local NewPipe
+  Extractor v0.26.5 searches YouTube Music's Songs and Music Videos categories
+  directly and resolves open audio sources on demand. If local extraction fails,
+  Resonance falls back to Piped (`/search?filter=music_songs`, `/streams/:id`)
+  or Invidious
   (`/api/v1/search`, `/api/v1/videos/:id`) metadata + audio source.
   Resonance resolves an HTTPS audio URL on demand and streams through
   **Android Media3/ExoPlayer**, without a video view, browser or MP3 upload.
@@ -42,6 +45,9 @@ automatic queue progression. YouTube source URLs expire; only stable video IDs
 are kept in local playlists and URLs are re-resolved for playback.
 
 **YouTube is not officially supported for this third-party audio-only use.**
+NewPipe Extractor is distributed under GPL-3.0-or-later; its upstream source is
+https://github.com/TeamNewPipe/NewPipeExtractor and Resonance's GPL license
+applies to this integration.
 There is no official YouTube Music public raw-audio streaming API for such a
 client. Piped/Invidious services can go offline, return 403 responses, serve
 incorrect results, or fail in some countries. Audio-only/background playback
