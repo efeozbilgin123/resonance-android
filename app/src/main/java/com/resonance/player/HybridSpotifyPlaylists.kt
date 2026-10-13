@@ -9,6 +9,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -39,6 +40,7 @@ fun HybridSpotifyPlaylists(
     activity: Activity,
     onExternalPlay: (ExternalPlaylistItem) -> Unit,
     onPremiumPlay: (SpotifyTrack) -> Unit,
+    onPlayQueue: (UnifiedSong, List<UnifiedSong>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val client = remember { SpotifyClient(activity) }
@@ -51,6 +53,7 @@ fun HybridSpotifyPlaylists(
     var playlists by remember { mutableStateOf<List<SpotifyPlaylist>>(emptyList()) }
     var spotifyRows by remember { mutableStateOf<List<SpotifyTrack>>(emptyList()) }
     var externalRows by remember { mutableStateOf<List<ExternalPlaylistItem>>(emptyList()) }
+    var localOrder by remember { mutableStateOf<List<String>>(emptyList()) }
     var found by remember { mutableStateOf<List<SpotifyTrack>>(emptyList()) }
     var mode by remember { mutableStateOf("playlists") }
     var search by remember { mutableStateOf("") }
@@ -143,6 +146,7 @@ fun HybridSpotifyPlaylists(
         val playlist = selected ?: return@LaunchedEffect
         if (accountId.isBlank()) return@LaunchedEffect
         externalRows = local.entries(accountId, playlist.id)
+        localOrder = local.readOrder(accountId, playlist.id)
         busy = true
         try {
             spotifyRows = withContext(Dispatchers.IO) { client.playlistTracks(playlist.id) }
@@ -150,6 +154,19 @@ fun HybridSpotifyPlaylists(
             message = "Spotify parçaları alınamadı: ${e.localizedMessage ?: "Yetki hatası"}"
             spotifyRows = emptyList()
         } finally { busy = false }
+    }
+
+    val merged = remember(spotifyRows, externalRows, localOrder) {
+        HybridPlaylistOrder.merge(spotifyRows, externalRows, localOrder)
+    }
+
+    fun playMixed(row: HybridPlaylistRow) {
+        val target = row.unified()
+        if (target == null) {
+            message = "Bu Spotify yerel dosyası başka cihazda oynatılamaz."
+            return
+        }
+        onPlayQueue(target, merged.mapNotNull { it.unified() })
     }
 
     Column(modifier.fillMaxWidth().background(Color(0xFF080B0A)).padding(horizontal = 16.dp),
