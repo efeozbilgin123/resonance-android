@@ -1,3 +1,6 @@
+#[cfg(target_os = "android")]
+mod native_spotify;
+
 //! Resonance playback queue policy. Android Media3 decodes and streams audio.
 //! Rust owns skip/shuffle/repeat decisions and exposes them over JNI.
 //! This engine never accesses Spotify audio streams.
