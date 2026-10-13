@@ -75,10 +75,14 @@ class MainActivity : ComponentActivity() {
                     Row(Modifier.fillMaxWidth().padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("RESONANCE", color = lime, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp)
                         Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { page = 3 }) { Text("Spotify", color = lime) }
                         IconButton(onClick = { picker.launch(arrayOf("audio/*")) }) {
                             Icon(Icons.Rounded.LibraryAdd, contentDescription = "Müzik içe aktar", tint = lime)
                         }
                     }
+                    if (page == 3) {
+                        SpotifyScreen(this@MainActivity)
+                    } else {
                     Text(
                         when(page) { 0 -> "Müzik senin dünyan."; 1 -> "Keşfet"; else -> "Kütüphanen" },
                         Modifier.padding(horizontal = 22.dp), color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 28.sp
@@ -155,6 +159,7 @@ class MainActivity : ComponentActivity() {
                         listOf(Triple("Ana sayfa", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
                             NavigationBarItem(selected = page == n, onClick = { page = n }, icon = { Icon(icon, null) }, label = { Text(label) })
                         }
+                    }
                     }
                 }
             }
