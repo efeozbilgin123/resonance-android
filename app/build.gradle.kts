@@ -20,6 +20,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
+    implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.concurrent:concurrent-futures:1.2.0")
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-exoplayer-hls:1.8.0")
