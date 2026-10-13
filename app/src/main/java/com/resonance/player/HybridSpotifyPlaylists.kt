@@ -39,7 +39,8 @@ fun HybridSpotifyPlaylists(
     activity: Activity,
     onExternalPlay: (ExternalPlaylistItem) -> Unit,
     onPremiumPlay: (SpotifyTrack) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onSearchClick: () -> Unit = {}
 ) {
     val client = remember { SpotifyClient(activity) }
     val local = remember { HybridPlaylistStore(activity) }
@@ -190,13 +191,13 @@ fun HybridSpotifyPlaylists(
                     }
                 }
             }
-            Text("Spotify müziği Spotify Connect'te çalar. Audius/yerel kayıtları Resonance çalar.",
+            Text("Spotify Premium Rust ile, YouTube/Audius/yerel kayıtlar Resonance içinde çalar.",
                 color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 listOf("playlists" to "Listeler", "search" to "Spotify ara").forEach { (id, label) ->
                     FilterChip(selected = mode == id, label = { Text(label) }, onClick = {
-                        mode = id
-                        selected = null
+                        if (id == "search") onSearchClick()
+                        else { mode = id; selected = null }
                     })
                 }
             }
@@ -362,7 +363,7 @@ fun HybridSpotifyPlaylists(
                     }
                     if (externalRows.isEmpty()) {
                         item {
-                            Text("Audius'ta bir parçanın yanındaki liste simgesinden bu listeye ekleyebilirsin.",
+                            Text("Birleşik Arama ekranında şarkının yanındaki liste simgesiyle buraya ekleyebilirsin.",
                                 color = Color.LightGray)
                         }
                     }
