@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 private val lime = Color(0xFFC6F17B)
@@ -94,8 +95,11 @@ class MainActivity : ComponentActivity() {
             var pendingSpotifyPremium by remember { mutableStateOf<SpotifyTrack?>(null) }
             var pendingYouTube by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
             var pendingAddSpotify by remember { mutableStateOf<SpotifyTrack?>(null) }
-            var unifiedQueue by remember { mutableStateOf<List<UnifiedSong>>(emptyList()) }
-            var unifiedQueueIndex by remember { mutableIntStateOf(-1) }
+            var playbackQueue by remember { mutableStateOf(PlaybackQueue()) }
+            var playbackPosition by remember { mutableLongStateOf(0L) }
+            var playbackDuration by remember { mutableLongStateOf(0L) }
+            val latestAutoAdvance = remember { mutableStateOf<() -> Unit>({}) }
+            val spotifyEngine = SpotifyAudioEngine
             var streamRequest by remember { mutableIntStateOf(0) }
             var activeUnified by remember { mutableStateOf<UnifiedSong?>(null) }
             var audioRetryUsed by remember { mutableStateOf(false) }
@@ -104,7 +108,16 @@ class MainActivity : ComponentActivity() {
                 SpotifyClient(this@MainActivity)) }
             DisposableEffect(Unit) {
                 val listener = object : Player.Listener {
-                    override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        playing = isPlaying
+                        if (isPlaying) error = null
+                    }
+                    override fun onPlaybackStateChanged(state: Int) {
+                        if (state == Player.STATE_ENDED &&
+                            activeUnified?.source != MusicOrigin.SPOTIFY) {
+                            latestAutoAdvance.value()
+                        }
+                    }
                     override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
                         item ?: return
                         val location = item.localConfiguration?.uri ?: return
@@ -172,9 +185,9 @@ class MainActivity : ComponentActivity() {
                 storage.edit().putStringSet("uris", songs.map { it.uri.toString() }.toSet()).apply()
             }
             val startSong: (Song) -> Unit = { track ->
+                spotifyEngine.stop()
                 activeUnified = null
-                unifiedQueue = emptyList()
-                unifiedQueueIndex = -1
+                playbackQueue = PlaybackQueue()
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     active.setMediaItem(MediaItem.Builder().setUri(track.uri).setMediaMetadata(
@@ -188,9 +201,9 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val startRadio: (RadioStation) -> Unit = { station ->
+                spotifyEngine.stop()
                 activeUnified = null
-                unifiedQueue = emptyList()
-                unifiedQueueIndex = -1
+                playbackQueue = PlaybackQueue()
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     val item = MediaItem.Builder().setUri(station.stream)
@@ -207,9 +220,9 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val startAudius: (AudiusTrack, List<AudiusTrack>) -> Unit = { track, tracks ->
+                spotifyEngine.stop()
                 activeUnified = null
-                unifiedQueue = emptyList()
-                unifiedQueueIndex = -1
+                playbackQueue = PlaybackQueue()
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     val playable = tracks.map { candidate ->
