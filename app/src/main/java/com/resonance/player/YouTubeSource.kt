@@ -3,6 +3,8 @@ package com.resonance.player
 import android.net.Uri
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URLDecoder
 import java.net.URL
 
 /**
@@ -31,15 +33,20 @@ object YouTubeLinks {
     fun parse(raw: String): String? {
         val text = raw.trim()
         if (VIDEO.matches(text)) return text
-        val uri = runCatching { Uri.parse(text) }.getOrNull() ?: return null
-        if (uri.scheme?.lowercase() != "https") return null
-        val host = uri.host?.lowercase() ?: return null
+        val link = runCatching { URI(text) }.getOrNull() ?: return null
+        if (link.scheme?.lowercase() != "https") return null
+        if (link.userInfo != null || link.port != -1) return null
+        val host = link.host?.lowercase() ?: return null
         if (host !in SAFE_HOSTS) return null
-        val segments = uri.pathSegments
+        val segments = link.path.trim('/').split('/').filter { it.isNotBlank() }
         val candidate = when {
-            host.endsWith("youtu.be") -> segments.firstOrNull()
-            segments.firstOrNull() == "watch" -> uri.getQueryParameter("v")
-            segments.firstOrNull() in setOf("shorts", "live", "embed", "v") -> segments.getOrNull(1)
+            host == "youtu.be" || host == "www.youtu.be" -> segments.firstOrNull()
+            segments.firstOrNull() == "watch" -> link.rawQuery
+                ?.split('&')?.firstOrNull { it.startsWith("v=") }
+                ?.substringAfter('=')
+                ?.let { URLDecoder.decode(it, "UTF-8") }
+            segments.firstOrNull() in setOf("shorts", "live", "embed", "v") ->
+                segments.getOrNull(1)
             else -> null
         } ?: return null
         return candidate.takeIf { VIDEO.matches(it) }
