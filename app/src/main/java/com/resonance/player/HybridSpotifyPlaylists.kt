@@ -58,7 +58,6 @@ fun HybridSpotifyPlaylists(
     var pendingSpotify by remember { mutableStateOf<SpotifyTrack?>(null) }
     var matching by remember { mutableStateOf<SpotifyTrack?>(null) }
     var pendingExternal by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
-    var addingYouTubeToList by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var reload by remember { mutableIntStateOf(0) }
@@ -346,12 +345,8 @@ fun HybridSpotifyPlaylists(
                         }
                     }
                     item {
-                        Button(onClick = { addingYouTubeToList = true },
-                            modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Rounded.SmartDisplay, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("YouTube / YouTube Music bağlantısı ekle")
-                        }
+                        Text("Spotify, YouTube Music ve Audius parçalarını tek arama ekranından bulup + simgesiyle buraya ekleyebilirsin.",
+                            color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
                     }
                     item {
                         Spacer(Modifier.height(12.dp))
@@ -362,7 +357,7 @@ fun HybridSpotifyPlaylists(
                     }
                     if (externalRows.isEmpty()) {
                         item {
-                            Text("Audius'ta bir parçanın yanındaki liste simgesinden bu listeye ekleyebilirsin.",
+                            Text("Ara sekmesindeki Spotify / YouTube Music / Audius şarkılarından liste simgesine basarak ekleyebilirsin.",
                                 color = Color.LightGray)
                         }
                     }
@@ -400,23 +395,6 @@ fun HybridSpotifyPlaylists(
                 selected = null
             }, enabled = !busy) { Text("Spotify izinlerini yenile / hesap değiştir") }
         }
-    }
-    if (addingYouTubeToList) {
-        YouTubeImportDialog(initialUrl = "",
-            onSave = { video ->
-                val list = selected
-                if (list == null || accountId.isBlank()) {
-                    message = "Önce Spotify çalma listeni seç."
-                } else {
-                    val added = local.add(accountId, list.id, video.asExternal())
-                    externalRows = local.entries(accountId, list.id)
-                    message = if (added) "YouTube bağlantısı Resonance'a kaydedildi (Spotify sunucusuna değil)."
-                        else "YouTube videosu bu listede zaten var."
-                }
-                addingYouTubeToList = false
-            },
-            onDismiss = { addingYouTubeToList = false }
-        )
     }
     matching?.let { track ->
         SourceMatchDialog(
