@@ -81,6 +81,31 @@ object RelevanceRanker {
             penalty + 0.09 / (1.0 + providerRank * 0.2)).coerceIn(0.0, 1.2)
     }
 
+    /**
+     * Conservative source matching prevents playing a cover/live recording as
+     * if it were an official Spotify song. The user selects if confidence is low.
+     */
+    fun crossSourceScore(reference: UnifiedMusicTrack, candidate: UnifiedMusicTrack): Double {
+        if (reference.source != CatalogSource.SPOTIFY ||
+            candidate.source != CatalogSource.YOUTUBE) return 0.0
+        val title = dice(tokens(reference.title), tokens(candidate.title))
+        val performer = dice(tokens(reference.artist), tokens(candidate.artist))
+        val timing = if (reference.duration > 0 && candidate.duration > 0) {
+            val diff = kotlin.math.abs(reference.duration - candidate.duration)
+            when {
+                diff <= 5 -> 1.0
+                diff <= 14 -> 0.75
+                diff <= 30 -> 0.35
+                else -> 0.0
+            }
+        } else 0.5
+        val name = normalize(candidate.title)
+        val penalty = if (undesirable.any { name.contains(it) } &&
+            undesirable.none { normalize(reference.title).contains(it) }) 0.22 else 0.0
+        return (0.58 * title + 0.32 * performer + 0.10 * timing -
+            penalty).coerceIn(0.0, 1.0)
+    }
+
     /** Keep the best result for repeated uploads within the same catalog. */
     fun merge(query: String, songs: List<UnifiedMusicTrack>): List<UnifiedMusicTrack> {
         val ranked = songs.sortedWith(compareByDescending<UnifiedMusicTrack> { it.score }
