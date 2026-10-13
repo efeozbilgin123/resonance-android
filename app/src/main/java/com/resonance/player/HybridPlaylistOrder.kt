@@ -22,8 +22,8 @@ data class HybridPlaylistRow(
 
     fun unified(): UnifiedSong? = when {
         spotify != null -> {
-            if (!spotify.uri.startsWith("spotify:track:")) return null
-            UnifiedSong(spotify.uri, MusicOrigin.SPOTIFY, spotify.title,
+            if (!spotify.uri.startsWith("spotify:track:")) null
+            else UnifiedSong(spotify.uri, MusicOrigin.SPOTIFY, spotify.title,
                 spotify.artist, spotify.durationSeconds)
         }
         external != null -> {
