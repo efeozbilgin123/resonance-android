@@ -21,8 +21,14 @@ data class ExternalPlaylistItem(
     val artwork: String = ""
 ) {
     init {
-        require(source in setOf("audius", "local", "https"))
+        require(source in setOf("audius", "local", "https", "youtube"))
         require(id.isNotBlank() && playbackUri.isNotBlank())
+        if (source == "youtube") {
+            require(id.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) { "Geçersiz YouTube kimliği" }
+            require(playbackUri == "https://www.youtube.com/watch?v=$id") {
+                "Geçersiz YouTube URL"
+            }
+        }
     }
     fun json(): JSONObject = JSONObject()
         .put("source", source).put("id", id).put("title", title)
