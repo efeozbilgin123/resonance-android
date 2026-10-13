@@ -2,7 +2,7 @@ name: Build Resonance Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'feature/playback-queue-reliability-v08']
+    branches: [main, 'feature/playback-queue-reliability-v08', 'feature/library-liked-youtube-v09']
 concurrency:
   group: resonance-${{ github.ref }}
   cancel-in-progress: true
