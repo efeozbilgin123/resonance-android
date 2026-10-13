@@ -25,6 +25,17 @@ class UnifiedCatalogRankingTest {
         assertEquals(CatalogSource.YOUTUBE, merged[1].source)
     }
 
+    @Test fun picksActualRecordingOverLiveCover() {
+        val spotify = UnifiedMusicTrack("spotify:track:abc", "Stronger", "Kanye West", 312,
+            "", CatalogSource.SPOTIFY, 0.99)
+        val original = UnifiedMusicTrack("abc12345678", "Stronger", "Kanye West - Topic", 311,
+            "", CatalogSource.YOUTUBE, 0.95)
+        val live = UnifiedMusicTrack("def12345678", "Stronger Live Cover", "Unknown Band", 440,
+            "", CatalogSource.YOUTUBE, 0.80)
+        assertTrue(RelevanceRanker.crossSourceScore(spotify, original) >= 0.9)
+        assertTrue(RelevanceRanker.crossSourceScore(spotify, live) < 0.78)
+    }
+
     @Test fun handlesTurkishSpellingAndStableOrdering() {
         assertEquals("cilekes ask", RelevanceRanker.normalize("ÇİLEKEŞ AŞK"))
         val list = listOf(
