@@ -11,7 +11,12 @@ Independent Android audio player in Kotlin / Jetpack Compose, Media3, and Rust J
 
 ## Supported functionality
 
-- **YouTube/YouTube Music links:** Paste video links or share videos via Android's\n  Share -> Resonance menu. Resolves public video titles via YouTube oEmbed,\n  persists a local YouTube library, and attaches links as *Resonance-only*\n  entries to Spotify-linked playlists. Playback uses YouTube's official\n  embeddable video player within WebView (visible video + original controls),\n  **not extracted audio**, and is not guaranteed to continue in the background.\n- **Independent music:** Browse, search, and play on-demand tracks from
+- **YouTube/YouTube Music links:** Paste video links or share videos via Android's
+  Share -> Resonance menu. Resolves public video titles via YouTube oEmbed,
+  persists a local YouTube library, and attaches links as *Resonance-only*
+  entries to Spotify-linked playlists. Playback uses YouTube's official
+  embeddable video player within WebView (visible video + original controls),
+  **not extracted audio**, and is not guaranteed to continue in the background.\n- **Independent music:** Browse, search, and play on-demand tracks from
   [Audius](https://docs.audius.co/api/), with artwork and favorites.
 - **Radio:** Browse free live radio stations via Radio Browser, with favorites.
 - **Local files:** Import permitted audio using the Android storage picker.
@@ -30,7 +35,15 @@ Independent Android audio player in Kotlin / Jetpack Compose, Media3, and Rust J
 - **Portable sidecar backups:** Export/import the on-device external playlist
   extras in JSON. Backup contains playlist metadata, not Spotify credentials.
   Local file URIs are **not portable** to another phone.
-- **Spotify Premium audio (experimental, ARM64):** Rust **librespot-core 0.8.0**\n  and **librespot-playback 0.8.0** plus a JNI sink stream PCM through Android\n  AudioTrack at 44.1 kHz stereo, 16-bit. The player authenticates with an\n  OAuth token issued to the user's connected Spotify Developer app. Native\n  playback is the default Premium tab and DOES NOT require installing Spotify.\n  Unlike Spotifast on desktop, this Android implementation is not yet a\n  Spotify Connect receiver, and media-session/background/headset controls for\n  native Spotify playback need separate integration. A Premium account is\n  required; runtime login and decoding have **not been tested on a real account**.\n- **Spotify Web SDK fallback (experimental):** Embedded official Web Playback SDK
+- **Spotify Premium audio (experimental, ARM64):** Rust **librespot-core 0.8.0**
+  and **librespot-playback 0.8.0** plus a JNI sink stream PCM through Android
+  AudioTrack at 44.1 kHz stereo, 16-bit. The player authenticates with an
+  OAuth token issued to the user's connected Spotify Developer app. Native
+  playback is the default Premium tab and DOES NOT require installing Spotify.
+  Unlike Spotifast on desktop, this Android implementation is not yet a
+  Spotify Connect receiver, and media-session/background/headset controls for
+  native Spotify playback need separate integration. A Premium account is
+  required; runtime login and decoding have **not been tested on a real account**.\n- **Spotify Web SDK fallback (experimental):** Embedded official Web Playback SDK
   served from a trusted local HTTPS WebViewAssetLoader origin. This *might not
   work* on Android WebView if EME DRM is unavailable. There is a button to
   open the **official Spotify Web Player in a supported Android browser**.
