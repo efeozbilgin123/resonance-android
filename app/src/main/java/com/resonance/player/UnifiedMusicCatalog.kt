@@ -17,7 +17,7 @@ import kotlin.math.abs
  * Spotify URI is never used as an audio URL, and a YouTube ID is never
  * represented as an item saved to Spotify servers.
  */
-enum class MusicOrigin { SPOTIFY, YOUTUBE_MUSIC, AUDIUS }
+enum class MusicOrigin { SPOTIFY, YOUTUBE_MUSIC, AUDIUS, LOCAL, STREAM }
 
 data class UnifiedSong(
     val id: String,
@@ -39,6 +39,8 @@ data class UnifiedSong(
         MusicOrigin.AUDIUS -> ExternalPlaylistItem(
             "audius", id, title, artist,
             "https://api.audius.co/v1/tracks/${Uri.encode(id)}/stream?app_name=ResonanceAndroid", cover)
+        MusicOrigin.LOCAL -> ExternalPlaylistItem("local", id, title, artist, id, cover)
+        MusicOrigin.STREAM -> ExternalPlaylistItem("https", id, title, artist, id, cover)
         MusicOrigin.SPOTIFY -> error("Spotify parçaları yalnız Spotify Web API ile listeye eklenir")
     }
     fun spotifyTrack() = SpotifyTrack(id, title, artist, false, duration)
@@ -88,6 +90,8 @@ object MusicRelevance {
                     MusicOrigin.YOUTUBE_MUSIC -> 0
                     MusicOrigin.SPOTIFY -> 1
                     MusicOrigin.AUDIUS -> 2
+                    MusicOrigin.LOCAL -> 3
+                    MusicOrigin.STREAM -> 4
                 } }
         )
 }
@@ -327,6 +331,8 @@ class UnifiedMusicCatalog(private val context: Context, private val spotify: Spo
             MusicOrigin.YOUTUBE_MUSIC -> youtube.resolve(song.id)
             MusicOrigin.AUDIUS -> YouTubeAudioProvider.Resolved(
                 song.external().playbackUri, "audio/mpeg", "Audius")
+            MusicOrigin.LOCAL -> YouTubeAudioProvider.Resolved(song.id, "", "Yerel")
+            MusicOrigin.STREAM -> YouTubeAudioProvider.Resolved(song.id, "", "Bağımsız yayın")
             MusicOrigin.SPOTIFY -> error("Spotify sesi yalnızca Premium Rust oynatıcısında")
         }
 }
