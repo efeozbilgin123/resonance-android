@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
             var streamUrl by remember { mutableStateOf("") }
             var favorites by remember { mutableStateOf(storage.getStringSet("favorites", emptySet()).orEmpty()) }
             var error by remember { mutableStateOf<String?>(null) }
+            var pendingExternal by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
             DisposableEffect(Unit) {
                 val listener = object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
@@ -152,6 +153,21 @@ class MainActivity : ComponentActivity() {
                     error = null
                 }.onFailure { error = it.localizedMessage }
             }
+            val playExternal: (ExternalPlaylistItem) -> Unit = { track ->
+                runCatching {
+                    val active = controller ?: error("Oynatıcı henüz hazır değil")
+                    val item = MediaItem.Builder().setUri(track.playbackUri)
+                        .setMediaMetadata(MediaMetadata.Builder()
+                            .setTitle(track.title).setArtist(track.artist).build())
+                        .build()
+                    active.setMediaItem(item)
+                    active.prepare()
+                    active.play()
+                    selected = Song(Uri.parse(track.playbackUri), track.title, track.artist)
+                    playing = true
+                    error = null
+                }.onFailure { error = it.localizedMessage }
+            }
             MaterialTheme(colorScheme = darkColorScheme(primary = lime, background = bg, surface = panel)) {
                 Column(Modifier.fillMaxSize().background(bg).statusBarsPadding().navigationBarsPadding()) {
                     Row(Modifier.fillMaxWidth().padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -163,10 +179,11 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     if (page == 3) {
-                        SpotifyScreen(this@MainActivity)
+                        SpotifyScreen(this@MainActivity, playExternal)
                     } else if (page == 4 || page == 5) {
                         if (page == 5) {
-                            AudiusScreen(this@MainActivity, startAudius, Modifier.weight(1f))
+                            AudiusScreen(this@MainActivity, startAudius, Modifier.weight(1f),
+                                onAddExternal = { pendingExternal = it })
                         } else {
                             RadioScreen(this@MainActivity, startRadio, Modifier.weight(1f))
                         }
@@ -267,6 +284,13 @@ class MainActivity : ComponentActivity() {
                                         Text(track.artist, color = muted, fontSize = 12.sp, maxLines = 1)
                                     }
                                     IconButton(onClick = {
+                                        pendingExternal = ExternalPlaylistItem.fromLocal(
+                                            track.uri, track.title, track.artist)
+                                    }) {
+                                        Icon(Icons.Rounded.PlaylistAdd,
+                                            contentDescription = "Resonance listesine ekle", tint = lime)
+                                    }
+                                    IconButton(onClick = {
                                         val key = track.uri.toString()
                                         favorites = if(key in favorites) favorites - key else favorites + key
                                         storage.edit().putStringSet("favorites", favorites).apply()
@@ -302,6 +326,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     }
+                }
+                pendingExternal?.let { track ->
+                    SpotifyPlaylistPicker(this@MainActivity, external = track,
+                        onDismiss = { pendingExternal = null })
                 }
             }
         }
