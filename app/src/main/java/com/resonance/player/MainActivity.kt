@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
             var favorites by remember { mutableStateOf(storage.getStringSet("favorites", emptySet()).orEmpty()) }
             var error by remember { mutableStateOf<String?>(null) }
             var pendingExternal by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
+            var pendingSpotifyPremium by remember { mutableStateOf<SpotifyTrack?>(null) }
             DisposableEffect(Unit) {
                 val listener = object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
@@ -179,7 +180,14 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     if (page == 3) {
-                        SpotifyScreen(this@MainActivity, playExternal)
+                        SpotifyScreen(this@MainActivity, playExternal, onPremiumPlay = { track ->
+                            controller?.pause()
+                            pendingSpotifyPremium = track
+                            page = 6
+                        })
+                    } else if (page == 6) {
+                        PremiumSpotifyWebScreen(this@MainActivity, pendingSpotifyPremium,
+                            onBack = { page = 3 }, modifier = Modifier.weight(1f))
                     } else if (page == 4 || page == 5) {
                         if (page == 5) {
                             AudiusScreen(this@MainActivity, startAudius, Modifier.weight(1f),
