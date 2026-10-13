@@ -244,17 +244,30 @@ fn run_engine(
     runtime.spawn(async move {
         while let Some(event) = player_events.recv().await {
             match event {
-                PlayerEvent::Playing { .. } =>
-                    event_emitter.status("Spotify'dan ses çalıyor."),
-                PlayerEvent::Paused { .. } =>
-                    event_emitter.status("Spotify parçası duraklatıldı."),
-                PlayerEvent::Unavailable { .. } =>
-                    event_emitter.status("Spotify bu kaydı açamadı. Premium ve parça erişimini kontrol et."),
-                PlayerEvent::EndOfTrack { .. } =>
-                    event_emitter.status("Spotify parçası tamamlandı."),
-                PlayerEvent::SessionDisconnected { .. } =>
-                    event_emitter.status("Spotify bağlantısı kesildi."),
+                PlayerEvent::Playing { position_ms, .. } => {
+                    event_emitter.event(2, position_ms as i32);
+                    event_emitter.status("Spotify'dan ses çalıyor.");
+                }
+                PlayerEvent::Paused { position_ms, .. } => {
+                    event_emitter.event(3, position_ms as i32);
+                    event_emitter.status("Spotify parçası duraklatıldı.");
+                }
+                PlayerEvent::PositionChanged { position_ms, .. } =>
+                    event_emitter.event(7, position_ms as i32),
+                PlayerEvent::Unavailable { .. } => {
+                    event_emitter.event(5, 0);
+                    event_emitter.status("Spotify bu kaydı açamadı. Premium erişimini kontrol et.");
+                }
+                PlayerEvent::EndOfTrack { .. } => {
+                    event_emitter.event(4, 0);
+                    event_emitter.status("Spotify parçası tamamlandı.");
+                }
+                PlayerEvent::SessionDisconnected { .. } => {
+                    event_emitter.event(6, 0);
+                    event_emitter.status("Spotify bağlantısı kesildi.");
+                }
                 _ => {}
+
             }
         }
     });
