@@ -29,12 +29,24 @@ class PlaybackQueueTest {
     }
 
     @Test fun shuffleNeverImmediatelyRepeatsSameItem() {
-        var queue=PlaybackQueue().start(original,spotify.stableKey).withShuffle(true)
+        var queue=PlaybackQueue().start(original,spotify.stableKey)
+            .withRepeat(1).withShuffle(true)
         repeat(100) {
             val current=queue.currentIndex
             queue=queue.forward()!!
             assertNotEquals(current,queue.currentIndex)
         }
+    }
+
+    @Test fun shuffleWithoutRepeatFinishesAfterAllSongsOnce() {
+        var queue=PlaybackQueue().start(original,spotify.stableKey).withShuffle(true)
+        val observed=mutableSetOf(queue.currentIndex)
+        while (true) {
+            val next=queue.forward(automatic=true) ?: break
+            assertTrue("Shuffle should play every song once",observed.add(next.currentIndex))
+            queue=next
+        }
+        assertEquals(original.size,observed.size)
     }
 
     @Test fun reorderedCurrentTrackRetainsIdentity() {
