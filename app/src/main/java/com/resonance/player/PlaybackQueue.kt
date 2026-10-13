@@ -45,7 +45,7 @@ data class PlaybackQueue(
         }
         val n = currentIndex + 1
         if (n < entries.size) return copy(currentIndex = n)
-        return if (repeat == 1) copy(currentIndex = 0) else null
+        return if (repeat > 0) copy(currentIndex = 0) else null
     }
 
     fun backward(): PlaybackQueue? {
