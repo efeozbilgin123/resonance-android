@@ -196,6 +196,13 @@ class YouTubeAudioProvider(context: Context) {
         val server: String)
 
     private val streamCache = ConcurrentHashMap<String, Pair<Long, Resolved>>()
+    private val rejectedProvider = ConcurrentHashMap<String, String>()
+
+    fun invalidate(videoId: String) {
+        streamCache.remove(videoId)?.let { cached ->
+            rejectedProvider[videoId] = cached.second.server
+        }
+    }
 
     fun resolve(videoId: String): Resolved {
         require(videoId.matches(Regex("[A-Za-z0-9_-]{11}")))
@@ -203,6 +210,7 @@ class YouTubeAudioProvider(context: Context) {
             ?.let { return it.second }
         var last: Exception? = null
         for (base in bases()) {
+            if (base == rejectedProvider[videoId]) continue
             try {
                 val piped = base.contains("piped")
                 val response = JSONObject(api(base,
@@ -284,6 +292,10 @@ class UnifiedMusicCatalog(private val context: Context, private val spotify: Spo
             }
         }
         return SearchBundle(MusicRelevance.rank(query, results), warnings)
+    }
+
+    fun invalidateStream(song: UnifiedSong) {
+        if (song.source == MusicOrigin.YOUTUBE_MUSIC) youtube.invalidate(song.id)
     }
 
     fun audioStream(song: UnifiedSong): YouTubeAudioProvider.Resolved =
