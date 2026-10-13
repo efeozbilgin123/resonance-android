@@ -1,6 +1,9 @@
 package com.resonance.player
 
 import android.app.Activity
+import coil.compose.AsyncImage
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -111,10 +114,16 @@ fun AudiusScreen(activity: Activity, onPlay: (AudiusTrack, List<AudiusTrack>) ->
                 Row(Modifier.fillMaxWidth().background(tile, RoundedCornerShape(16.dp))
                     .clickable { onPlay(song, tracks) }.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(50.dp).background(Color(0xFF283B2A), RoundedCornerShape(12.dp)),
-                        contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Album, null, tint = accentGreen,
-                            modifier = Modifier.size(30.dp))
+                    if (song.artwork.startsWith("https://")) {
+                        AsyncImage(model = song.artwork, contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(50.dp).clip(RoundedCornerShape(12.dp)))
+                    } else {
+                        Box(Modifier.size(50.dp).background(Color(0xFF283B2A), RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.Album, null, tint = accentGreen,
+                                modifier = Modifier.size(30.dp))
+                        }
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
