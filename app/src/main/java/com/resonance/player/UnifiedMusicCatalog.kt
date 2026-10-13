@@ -246,43 +246,44 @@ class YouTubeAudioProvider(context: Context) {
 class UnifiedMusicCatalog(private val context: Context, private val spotify: SpotifyClient) {
     private val youtube = YouTubeAudioProvider(context)
 
+    fun searchSpotify(query: String): List<UnifiedSong> {
+        if (!spotify.authorized) return emptyList()
+        val arr = spotify.get("/search?q=${Uri.encode(query.trim())}&type=track&limit=35")
+            .optJSONObject("tracks")?.optJSONArray("items") ?: JSONArray()
+        return (0 until arr.length()).mapNotNull { i ->
+            val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+            val uri = obj.optString("uri")
+            if (!uri.startsWith("spotify:track:")) return@mapNotNull null
+            val images = obj.optJSONObject("album")?.optJSONArray("images")
+            UnifiedSong(uri, MusicOrigin.SPOTIFY, obj.optString("name"),
+                obj.optJSONArray("artists")?.optJSONObject(0)?.optString("name").orEmpty(),
+                obj.optInt("duration_ms") / 1000,
+                images?.optJSONObject(0)?.optString("url").orEmpty())
+        }
+    }
+
+    fun searchYouTube(query: String): List<UnifiedSong> = youtube.search(query)
+
+    fun searchAudius(query: String): List<UnifiedSong> =
+        AudiusCatalog.fetch(query).take(15).map {
+            UnifiedSong(it.id, MusicOrigin.AUDIUS, it.title, it.artist,
+                it.duration, it.artwork)
+        }
+
     fun search(query: String): SearchBundle {
-        val list = mutableListOf<UnifiedSong>()
-        val issues = mutableListOf<String>()
-        // Keep requests independent. Missing Spotify login must never disable YouTube.
-        if (spotify.authorized) try {
-            val data = spotify.get(
-                "/search?q=${Uri.encode(query.trim())}&type=track&limit=35")
-            val arr = data.optJSONObject("tracks")?.optJSONArray("items") ?: JSONArray()
-            for (i in 0 until arr.length()) {
-                val obj = arr.optJSONObject(i) ?: continue
-                val uri = obj.optString("uri")
-                if (!uri.startsWith("spotify:track:")) continue
-                val images = obj.optJSONObject("album")?.optJSONArray("images")
-                list += UnifiedSong(uri, MusicOrigin.SPOTIFY, obj.optString("name"),
-                    obj.optJSONArray("artists")?.optJSONObject(0)?.optString("name")
-                        .orEmpty(), obj.optInt("duration_ms") / 1000,
-                    images?.optJSONObject(0)?.optString("url").orEmpty())
+        val results = mutableListOf<UnifiedSong>()
+        val warnings = mutableListOf<String>()
+        val providers = listOf<Pair<String, () -> List<UnifiedSong>>>(
+            "Spotify" to { searchSpotify(query) },
+            "YouTube Music" to { searchYouTube(query) },
+            "Audius" to { searchAudius(query) }
+        )
+        for ((name, searcher) in providers) {
+            try { results += searcher() } catch (e: Exception) {
+                warnings += "$name: ${e.localizedMessage ?: "Bağlantı yok"}"
             }
-        } catch (e: Exception) {
-            issues += "Spotify araması: ${e.localizedMessage ?: "Bağlantı hatası"}"
         }
-
-        try {
-            list += youtube.search(query)
-        } catch (e: Exception) {
-            issues += "YouTube Music: ${e.localizedMessage ?: "Sunucular yanıt vermedi"}"
-        }
-        try {
-            list += AudiusCatalog.fetch(query).take(15).map { track ->
-                UnifiedSong(track.id, MusicOrigin.AUDIUS, track.title, track.artist,
-                    track.duration, track.artwork)
-            }
-        } catch (e: Exception) {
-            issues += "Audius: ${e.localizedMessage ?: "Bağlantı yok"}"
-        }
-
-        return SearchBundle(MusicRelevance.rank(query, list), issues)
+        return SearchBundle(MusicRelevance.rank(query, results), warnings)
     }
 
     fun audioStream(song: UnifiedSong): YouTubeAudioProvider.Resolved =
