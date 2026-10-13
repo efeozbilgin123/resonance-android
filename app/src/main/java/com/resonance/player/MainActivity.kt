@@ -1,8 +1,17 @@
 package com.resonance.player
 
 import android.content.Context
+import androidx.compose.runtime.DisposableEffect
 import android.media.MediaMetadataRetriever
-import android.media.MediaPlayer
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import androidx.core.content.ContextCompat
+import android.content.ComponentName
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -33,10 +42,13 @@ private val muted = Color(0xFF9BA39B)
 private data class Song(val uri: Uri, val title: String, val artist: String)
 
 class MainActivity : ComponentActivity() {
-    private var player: MediaPlayer? = null
+    private var controller: MediaController? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
+        val future = MediaController.Builder(this, token).buildAsync()
+        future.addListener({ runCatching { controller = future.get() } }, ContextCompat.getMainExecutor(this))
         val storage = getSharedPreferences("tracks", Context.MODE_PRIVATE)
         setContent {
             var songs by remember {
@@ -45,10 +57,44 @@ class MainActivity : ComponentActivity() {
             }
             var selected by remember { mutableStateOf<Song?>(null) }
             var playing by remember { mutableStateOf(false) }
-            var page by remember { mutableStateOf(0) }
+            var page by remember { mutableStateOf(5) }
+            var controllerReady by remember { mutableStateOf(false) }
+            var repeatMode by remember { mutableIntStateOf(0) }
+            var shuffle by remember { mutableStateOf(false) }
+            var queueIndex by remember { mutableIntStateOf(0) }
             var search by remember { mutableStateOf("") }
+            var streamUrl by remember { mutableStateOf("") }
             var favorites by remember { mutableStateOf(storage.getStringSet("favorites", emptySet()).orEmpty()) }
             var error by remember { mutableStateOf<String?>(null) }
+            DisposableEffect(Unit) {
+                val listener = object : Player.Listener {
+                    override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
+                    override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
+                        item ?: return
+                        val location = item.localConfiguration?.uri ?: return
+                        selected = Song(location,
+                            item.mediaMetadata.title?.toString() ?: "Ses yayını",
+                            item.mediaMetadata.artist?.toString() ?: "Resonance")
+                    }
+                    override fun onPlayerError(playerError: PlaybackException) {
+                        error = "Ses kaynağı açılamadı: ${playerError.localizedMessage}"
+                        playing = false
+                    }
+                }
+                var registered = false
+                val attach = {
+                    val c = controller
+                    if (c != null && !registered) {
+                        c.addListener(listener)
+                        registered = true
+                        controllerReady = true
+                        playing = c.isPlaying
+                    }
+                }
+                attach()
+                future.addListener({ attach() }, ContextCompat.getMainExecutor(this@MainActivity))
+                onDispose { if (registered) controller?.removeListener(listener) }
+            }
             val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { chosen ->
                 chosen.forEach { uri ->
                     try { contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
@@ -58,15 +104,51 @@ class MainActivity : ComponentActivity() {
             }
             val startSong: (Song) -> Unit = { track ->
                 runCatching {
-                    player?.release()
-                    player = MediaPlayer().apply {
-                        setDataSource(this@MainActivity, track.uri)
-                        setOnPreparedListener { it.start(); playing = true }
-                        setOnCompletionListener { playing = false }
-                        prepareAsync()
-                    }
+                    val active = controller ?: error("Oynatıcı henüz hazır değil")
+                    active.setMediaItem(MediaItem.Builder().setUri(track.uri).setMediaMetadata(
+                        MediaMetadata.Builder().setTitle(track.title).setArtist(track.artist).build()
+                    ).build())
+                    active.prepare()
+                    active.play()
                     selected = track
-                    playing = false
+                    playing = true
+                    error = null
+                }.onFailure { error = it.localizedMessage }
+            }
+            val startRadio: (RadioStation) -> Unit = { station ->
+                runCatching {
+                    val active = controller ?: error("Oynatıcı henüz hazır değil")
+                    val item = MediaItem.Builder().setUri(station.stream)
+                        .setMediaMetadata(MediaMetadata.Builder()
+                            .setTitle(station.name).setArtist("Canlı radyo · ${station.country}")
+                            .build())
+                        .build()
+                    active.setMediaItem(item)
+                    active.prepare()
+                    active.play()
+                    selected = Song(Uri.parse(station.stream), station.name, "Canlı radyo")
+                    playing = true
+                    error = null
+                }.onFailure { error = it.localizedMessage }
+            }
+            val startAudius: (AudiusTrack, List<AudiusTrack>) -> Unit = { track, tracks ->
+                runCatching {
+                    val active = controller ?: error("Oynatıcı henüz hazır değil")
+                    val playable = tracks.map { candidate ->
+                        MediaItem.Builder()
+                            .setUri(candidate.audioUrl)
+                            .setMimeType(MimeTypes.AUDIO_MPEG)
+                            .setMediaId(candidate.id)
+                            .setMediaMetadata(MediaMetadata.Builder()
+                                .setTitle(candidate.title).setArtist(candidate.artist).build())
+                            .build()
+                    }
+                    val index = tracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+                    active.setMediaItems(playable, index, 0L)
+                    active.prepare()
+                    active.play()
+                    selected = Song(Uri.parse(track.audioUrl), track.title, track.artist)
+                    playing = true
                     error = null
                 }.onFailure { error = it.localizedMessage }
             }
@@ -75,13 +157,56 @@ class MainActivity : ComponentActivity() {
                     Row(Modifier.fillMaxWidth().padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("RESONANCE", color = lime, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp)
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { page = 3 }) { Text("Spotify", color = lime) }
+                        TextButton(onClick = { page = if (page == 3) 5 else 3 }) { Text(if (page == 3) "Geri" else "Spotify hesabı", color = lime) }
                         IconButton(onClick = { picker.launch(arrayOf("audio/*")) }) {
                             Icon(Icons.Rounded.LibraryAdd, contentDescription = "Müzik içe aktar", tint = lime)
                         }
                     }
                     if (page == 3) {
                         SpotifyScreen(this@MainActivity)
+                    } else if (page == 4 || page == 5) {
+                        if (page == 5) {
+                            AudiusScreen(this@MainActivity, startAudius, Modifier.weight(1f))
+                        } else {
+                            RadioScreen(this@MainActivity, startRadio, Modifier.weight(1f))
+                        }
+                        selected?.let { track ->
+                            Row(Modifier.fillMaxWidth().background(panel).padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.MusicNote, null, tint = lime)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(track.title, color = Color.White, maxLines = 1)
+                                    Text(track.artist, color = muted, fontSize = 12.sp)
+                                }
+                                IconButton(onClick = { controller?.seekToPreviousMediaItem() },
+                                    enabled = controllerReady) {
+                                    Icon(Icons.Rounded.SkipPrevious, "Önceki", tint = lime)
+                                }
+                                IconButton(onClick = {
+                                    controller?.let { if (it.isPlaying) it.pause() else it.play() }
+                                }, enabled = controllerReady) {
+                                    Icon(if (playing) Icons.Rounded.PauseCircleFilled else Icons.Rounded.PlayCircleFilled,
+                                        contentDescription = if (playing) "Duraklat" else "Çal", tint = lime)
+                                }
+                                IconButton(onClick = { controller?.seekToNextMediaItem() },
+                                    enabled = controllerReady) {
+                                    Icon(Icons.Rounded.SkipNext, "Sonraki", tint = lime)
+                                }
+                            }
+                        }
+                        NavigationBar(containerColor = panel) {
+                            listOf(
+                                Triple("Müzik", Icons.Rounded.Album, 5),
+                                Triple("Radyo", Icons.Rounded.Radio, 4),
+                                Triple("Yerel", Icons.Rounded.Home, 0),
+                                Triple("Ara", Icons.Rounded.Search, 1),
+                                Triple("Kitaplık", Icons.Rounded.LibraryMusic, 2)
+                            ).forEach { (label, icon, n) ->
+                                NavigationBarItem(selected = page == n, onClick = { page = n },
+                                    icon = { Icon(icon, null) }, label = { Text(label) })
+                            }
+                        }
                     } else {
                     Text(
                         when(page) { 0 -> "Müzik senin dünyan."; 1 -> "Keşfet"; else -> "Kütüphanen" },
@@ -92,6 +217,22 @@ class MainActivity : ComponentActivity() {
                         OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth().padding(horizontal = 22.dp),
                             singleLine = true, label = { Text("Yerel şarkılarında ara") },
                             leadingIcon = { Icon(Icons.Rounded.Search, null) })
+                    }
+                    if (page == 1) {
+                        OutlinedTextField(streamUrl, { streamUrl = it }, Modifier.fillMaxWidth().padding(horizontal = 22.dp), singleLine = true, label = { Text("İzinli HTTPS radyo / ses akışı URL") })
+                        Button(onClick = {
+                            runCatching {
+                                val uri = Uri.parse(streamUrl.trim())
+                                require(uri.scheme == "https" && !uri.host.isNullOrBlank()) { "Geçerli HTTPS adresi gir" }
+                                val active = controller ?: error("Oynatıcı henüz hazır değil")
+                                active.setMediaItem(MediaItem.fromUri(uri))
+                                active.prepare()
+                                active.play()
+                                selected = Song(uri, "Çevrimiçi yayın", "Bağımsız ses kaynağı")
+                                playing = true
+                                error = null
+                            }.onFailure { error = it.localizedMessage }
+                        }, modifier = Modifier.padding(horizontal = 22.dp)) { Text("Yayını çal") }
                     }
                     if (songs.isEmpty()) {
                         Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -149,14 +290,14 @@ class MainActivity : ComponentActivity() {
                                 }
                                 IconButton(onClick = {
                                     runCatching {
-                                        player?.let { if (it.isPlaying) it.pause() else it.start(); playing = it.isPlaying }
+                                        controller?.let { if (it.isPlaying) it.pause() else it.play(); playing = it.isPlaying }
                                     }.onFailure { error = it.localizedMessage }
                                 }) { Icon(if(playing) Icons.Rounded.PauseCircleFilled else Icons.Rounded.PlayCircleFilled, null, tint = lime) }
                             }
                         }
                     }
                     NavigationBar(containerColor = panel) {
-                        listOf(Triple("Ana sayfa", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
+                        listOf(Triple("Müzik", Icons.Rounded.Album, 5), Triple("Radyo", Icons.Rounded.Radio, 4), Triple("Yerel", Icons.Rounded.Home, 0),Triple("Ara", Icons.Rounded.Search, 1), Triple("Kütüphane", Icons.Rounded.LibraryMusic, 2)).forEach { (label, icon, n) ->
                             NavigationBarItem(selected = page == n, onClick = { page = n }, icon = { Icon(icon, null) }, label = { Text(label) })
                         }
                     }
@@ -178,5 +319,5 @@ class MainActivity : ComponentActivity() {
         }
         return Song(uri, title, artist)
     }
-    override fun onDestroy() { player?.release(); super.onDestroy() }
+    override fun onDestroy() { controller?.release(); super.onDestroy() }
 }

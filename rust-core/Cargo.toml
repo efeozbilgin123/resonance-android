@@ -1,0 +1,11 @@
+[package]
+name = "resonance_core"
+version = "0.3.0"
+edition = "2021"
+
+[lib]
+name = "resonance_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni = { version = "0.21", default-features = false }
