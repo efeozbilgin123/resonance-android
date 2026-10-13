@@ -3,6 +3,8 @@ package com.resonance.player
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -66,6 +68,38 @@ fun HybridSpotifyPlaylists(
             try { block() } catch (e: Exception) {
                 message = e.localizedMessage ?: "Spotify işlemi başarısız"
             } finally { busy = false }
+        }
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            runTask {
+                val data = withContext(Dispatchers.IO) { local.exportAccount(accountId) }
+                withContext(Dispatchers.IO) {
+                    val stream = activity.contentResolver.openOutputStream(uri)
+                        ?: kotlin.error("Dosyaya yazılamıyor")
+                    stream.bufferedWriter(Charsets.UTF_8).use { it.write(data) }
+                }
+                message = "Resonance ekleri yedeklendi. Spotify hesabına yüklenmedi."
+            }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runTask {
+                val count = withContext(Dispatchers.IO) {
+                    val input = activity.contentResolver.openInputStream(uri)
+                        ?: kotlin.error("Yedek dosyası okunamadı")
+                    val data = input.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    local.importAccount(accountId, data)
+                }
+                reload++
+                message = "$count Resonance eki bu cihazdaki listelere aktarıldı."
+            }
         }
     }
 
@@ -162,6 +196,16 @@ fun HybridSpotifyPlaylists(
                         mode = id
                         selected = null
                     })
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TextButton(onClick = { exportLauncher.launch("Resonance-liste-yedegi.json") },
+                    enabled = accountId.isNotBlank() && !busy) {
+                    Text("Resonance eklerini yedekle")
+                }
+                TextButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain")) },
+                    enabled = accountId.isNotBlank() && !busy) {
+                    Text("Yedeği yükle")
                 }
             }
             if (mode == "search") {
