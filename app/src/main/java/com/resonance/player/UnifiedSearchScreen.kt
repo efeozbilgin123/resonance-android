@@ -46,6 +46,7 @@ fun UnifiedSearchScreen(
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onOpenPlayer: () -> Unit = {},
     initialLink: String? = null,
     modifier: Modifier = Modifier
 ) {
@@ -258,6 +259,8 @@ fun UnifiedSearchScreen(
                                     MusicOrigin.YOUTUBE_MUSIC -> "YouTube Music"
                                     MusicOrigin.SPOTIFY -> "Spotify · Premium"
                                     MusicOrigin.AUDIUS -> "Audius"
+                                    MusicOrigin.LOCAL -> "Yerel"
+                                    MusicOrigin.STREAM -> "Ses yayını"
                                 }, style = MaterialTheme.typography.labelSmall, color = green)
                                 if (track.duration > 0) {
                                     Text("  ·  ${track.duration / 60}:${(track.duration % 60)
@@ -278,7 +281,8 @@ fun UnifiedSearchScreen(
             }
         }
         if (!playingTitle.isNullOrBlank()) {
-            Row(Modifier.fillMaxWidth().background(darkTile).padding(
+            Row(Modifier.fillMaxWidth().background(darkTile)
+                .clickable { onOpenPlayer() }.padding(
                 horizontal = 12.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {

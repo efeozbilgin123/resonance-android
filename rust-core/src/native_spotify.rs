@@ -5,6 +5,7 @@
 //! Important: integration is experimental until tested on a Premium device.
 
 use std::path::PathBuf;
+use std::time::Duration;
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread;
 
@@ -71,6 +72,15 @@ impl AndroidEmitter {
                     &[JValue::Object(&obj)],
                 );
             }
+        }
+    }
+
+    fn event(&self, code: i32, position: i32) {
+        if let Ok(mut env) = self.vm.attach_current_thread() {
+            let _ = env.call_method(
+                self.output.as_obj(), "onEngineEvent", "(II)V",
+                &[JValue::Int(code), JValue::Int(position)],
+            );
         }
     }
 
@@ -192,7 +202,9 @@ fn run_engine(
         .build() {
         Ok(rt) => rt,
         Err(e) => {
+            emitter.event(8, 0);
             emitter.status(&format!("Rust ses motoru başlatılamadı: {e}"));
+            let _ = emitter.simple("onRelease");
             return;
         }
     };
@@ -209,7 +221,9 @@ fn run_engine(
     let session = match session_result {
         Ok(session) => session,
         Err(err) => {
+            emitter.event(8, 0);
             emitter.status(&format!("Spotify yetkilendirme başarısız: {err}"));
+            let _ = emitter.simple("onRelease");
             return;
         }
     };
@@ -217,6 +231,7 @@ fn run_engine(
     let audio_emitter = emitter.clone();
     let playback_config = PlayerConfig {
         bitrate: Bitrate::Bitrate320,
+        position_update_interval: Some(Duration::from_secs(1)),
         ..PlayerConfig::default()
     };
     let player = {
@@ -233,20 +248,34 @@ fn run_engine(
     runtime.spawn(async move {
         while let Some(event) = player_events.recv().await {
             match event {
-                PlayerEvent::Playing { .. } =>
-                    event_emitter.status("Spotify'dan ses çalıyor."),
-                PlayerEvent::Paused { .. } =>
-                    event_emitter.status("Spotify parçası duraklatıldı."),
-                PlayerEvent::Unavailable { .. } =>
-                    event_emitter.status("Spotify bu kaydı açamadı. Premium ve parça erişimini kontrol et."),
-                PlayerEvent::EndOfTrack { .. } =>
-                    event_emitter.status("Spotify parçası tamamlandı."),
-                PlayerEvent::SessionDisconnected { .. } =>
-                    event_emitter.status("Spotify bağlantısı kesildi."),
+                PlayerEvent::Playing { position_ms, .. } => {
+                    event_emitter.event(2, position_ms as i32);
+                    event_emitter.status("Spotify'dan ses çalıyor.");
+                }
+                PlayerEvent::Paused { position_ms, .. } => {
+                    event_emitter.event(3, position_ms as i32);
+                    event_emitter.status("Spotify parçası duraklatıldı.");
+                }
+                PlayerEvent::PositionChanged { position_ms, .. } =>
+                    event_emitter.event(7, position_ms as i32),
+                PlayerEvent::Unavailable { .. } => {
+                    event_emitter.event(5, 0);
+                    event_emitter.status("Spotify bu kaydı açamadı. Premium erişimini kontrol et.");
+                }
+                PlayerEvent::EndOfTrack { .. } => {
+                    event_emitter.event(4, 0);
+                    event_emitter.status("Spotify parçası tamamlandı.");
+                }
+                PlayerEvent::SessionDisconnected { .. } => {
+                    event_emitter.event(6, 0);
+                    event_emitter.status("Spotify bağlantısı kesildi.");
+                }
                 _ => {}
+
             }
         }
     });
+    emitter.event(1, 0);
     emitter.status("Spotify Premium bağlantısı hazır. Parçayı çalabilirsin.");
 
     for command in receiver {
@@ -271,6 +300,7 @@ fn run_engine(
         }
     }
     drop(player);
+    let _ = emitter.simple("onRelease");
     emitter.status("Spotify Premium oynatıcısı kapatıldı.");
     runtime.shutdown_background();
 }

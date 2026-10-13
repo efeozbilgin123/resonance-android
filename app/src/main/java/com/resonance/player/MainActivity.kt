@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 private val lime = Color(0xFFC6F17B)
@@ -94,17 +95,45 @@ class MainActivity : ComponentActivity() {
             var pendingSpotifyPremium by remember { mutableStateOf<SpotifyTrack?>(null) }
             var pendingYouTube by remember { mutableStateOf<ExternalPlaylistItem?>(null) }
             var pendingAddSpotify by remember { mutableStateOf<SpotifyTrack?>(null) }
-            var unifiedQueue by remember { mutableStateOf<List<UnifiedSong>>(emptyList()) }
-            var unifiedQueueIndex by remember { mutableIntStateOf(-1) }
+            val queueStorage = remember { PlaybackQueuePersistence(this@MainActivity) }
+            var playbackQueue by remember { mutableStateOf(queueStorage.restore()) }
+            LaunchedEffect(playbackQueue) {
+                withContext(Dispatchers.IO) { queueStorage.save(playbackQueue) }
+            }
+            var playbackPosition by remember { mutableLongStateOf(0L) }
+            var playbackDuration by remember { mutableLongStateOf(0L) }
+            val latestAutoAdvance = remember { mutableStateOf<() -> Unit>({}) }
+            val spotifyEngine = SpotifyAudioEngine
             var streamRequest by remember { mutableIntStateOf(0) }
-            var activeUnified by remember { mutableStateOf<UnifiedSong?>(null) }
-            var audioRetryUsed by remember { mutableStateOf(false) }
+            var activeUnified by remember {
+                mutableStateOf<UnifiedSong?>(playbackQueue.current)
+            }
+            LaunchedEffect(Unit) {
+                activeUnified?.let {
+                    if (selected == null) selected = Song(
+                        Uri.parse(it.id), it.title, it.artist)
+                }
+            }
+            var audioRetryAttempts by remember { mutableIntStateOf(0) }
+            var consecutiveFailures by remember { mutableIntStateOf(0) }
             val scope = rememberCoroutineScope()
             val unifiedCatalog = remember { UnifiedMusicCatalog(this@MainActivity,
                 SpotifyClient(this@MainActivity)) }
             DisposableEffect(Unit) {
                 val listener = object : Player.Listener {
-                    override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        playing = isPlaying
+                        if (isPlaying) {
+                            error = null
+                            consecutiveFailures = 0
+                        }
+                    }
+                    override fun onPlaybackStateChanged(state: Int) {
+                        if (state == Player.STATE_ENDED &&
+                            activeUnified?.source != MusicOrigin.SPOTIFY) {
+                            latestAutoAdvance.value()
+                        }
+                    }
                     override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
                         item ?: return
                         val location = item.localConfiguration?.uri ?: return
@@ -115,12 +144,13 @@ class MainActivity : ComponentActivity() {
                     override fun onPlayerError(playerError: PlaybackException) {
                         val track = activeUnified
                         if (track?.source == MusicOrigin.YOUTUBE_MUSIC &&
-                            !audioRetryUsed) {
-                            audioRetryUsed = true
-                            error = "YouTube ses kaynağı değiştiriliyor..."
+                            audioRetryAttempts < 3) {
+                            audioRetryAttempts++
+                            error = "YouTube ses kaynağı değiştiriliyor... (${audioRetryAttempts}/3)"
                             val seq = streamRequest
                             scope.launch {
                                 try {
+                                    delay(350L * audioRetryAttempts)
                                     val fresh = withContext(Dispatchers.IO) {
                                         unifiedCatalog.invalidateStream(track)
                                         unifiedCatalog.audioStream(track)
@@ -141,12 +171,18 @@ class MainActivity : ComponentActivity() {
                                     if (seq == streamRequest) {
                                         error = "YouTube kaynakları kullanılamıyor: ${e.localizedMessage}"
                                         playing = false
+                                        consecutiveFailures++
+                                        if (consecutiveFailures <= 3)
+                                            latestAutoAdvance.value()
                                     }
                                 }
                             }
                         } else {
                             error = "Ses kaynağı açılamadı: ${playerError.localizedMessage}"
                             playing = false
+                            consecutiveFailures++
+                            if (activeUnified != null && consecutiveFailures <= 3)
+                                latestAutoAdvance.value()
                         }
                     }
                 }
@@ -172,9 +208,9 @@ class MainActivity : ComponentActivity() {
                 storage.edit().putStringSet("uris", songs.map { it.uri.toString() }.toSet()).apply()
             }
             val startSong: (Song) -> Unit = { track ->
+                spotifyEngine.stop()
                 activeUnified = null
-                unifiedQueue = emptyList()
-                unifiedQueueIndex = -1
+                playbackQueue = PlaybackQueue()
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     active.setMediaItem(MediaItem.Builder().setUri(track.uri).setMediaMetadata(
@@ -188,9 +224,9 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val startRadio: (RadioStation) -> Unit = { station ->
+                spotifyEngine.stop()
                 activeUnified = null
-                unifiedQueue = emptyList()
-                unifiedQueueIndex = -1
+                playbackQueue = PlaybackQueue()
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     val item = MediaItem.Builder().setUri(station.stream)
@@ -207,9 +243,9 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val startAudius: (AudiusTrack, List<AudiusTrack>) -> Unit = { track, tracks ->
+                spotifyEngine.stop()
                 activeUnified = null
-                unifiedQueue = emptyList()
-                unifiedQueueIndex = -1
+                playbackQueue = PlaybackQueue()
                 runCatching {
                     val active = controller ?: error("Oynatıcı henüz hazır değil")
                     val playable = tracks.map { candidate ->
@@ -231,38 +267,43 @@ class MainActivity : ComponentActivity() {
                 }.onFailure { error = it.localizedMessage }
             }
             val launchUnifiedAudio: (UnifiedSong) -> Unit = { track ->
+                activeUnified = track
+                selected = Song(Uri.parse(track.id), track.title, track.artist)
+                error = null
                 if (track.source == MusicOrigin.SPOTIFY) {
-                    activeUnified = null
-                    unifiedQueue = emptyList()
-                    unifiedQueueIndex = -1
+                    ++streamRequest
                     controller?.pause()
                     pendingSpotifyPremium = track.spotifyTrack()
-                    page = 6
+                    if (spotifyEngine.ready || spotifyEngine.connecting) {
+                        spotifyEngine.load(track.spotifyTrack())
+                    } else {
+                        // First Premium selection authenticates inside the native page.
+                        page = 6
+                    }
                 } else {
-                    activeUnified = track
-                    audioRetryUsed = false
+                    if (spotifyEngine.ready || spotifyEngine.connecting) spotifyEngine.stop()
+                    audioRetryAttempts = 0
                     val seq = ++streamRequest
                     controller?.pause()
-                    error = null
                     scope.launch {
                         try {
                             val stream = withContext(Dispatchers.IO) {
                                 unifiedCatalog.audioStream(track)
                             }
                             if (seq == streamRequest) {
-                                val active = controller ?: error("Oynatıcı henüz hazır değil")
-                                val item = MediaItem.Builder().setUri(stream.url)
-                                    .setMimeType(stream.mimeType)
+                                val active = controller ?: kotlin.error("Oynatıcı henüz hazır değil")
+                                val builder = MediaItem.Builder().setUri(stream.url)
                                     .setMediaId(track.stableKey)
                                     .setMediaMetadata(MediaMetadata.Builder()
-                                        .setTitle(track.title).setArtist(track.artist)
-                                        .build())
-                                    .build()
-                                active.setMediaItem(item)
+                                        .setTitle(track.title).setArtist(track.artist).build())
+                                if (stream.mimeType.isNotBlank())
+                                    builder.setMimeType(stream.mimeType)
+                                active.setMediaItem(builder.build())
                                 active.prepare()
                                 active.play()
                                 selected = Song(Uri.parse(stream.url), track.title, track.artist)
                                 playing = true
+                                error = null
                             }
                         } catch (e: Exception) {
                             if (seq == streamRequest) {
@@ -274,77 +315,128 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val playUnified: (UnifiedSong, List<UnifiedSong>) -> Unit = { track, rows ->
-                unifiedQueue = rows.filter { it.source != MusicOrigin.SPOTIFY }
-                unifiedQueueIndex = unifiedQueue.indexOfFirst { it.stableKey == track.stableKey }
+                val list = rows.takeIf { data -> data.any { it.stableKey == track.stableKey } }
+                    ?: listOf(track)
+                playbackQueue = playbackQueue.start(list, track.stableKey)
                 launchUnifiedAudio(track)
             }
-            val unifiedNext: () -> Unit = {
-                if (unifiedQueue.isNotEmpty()) {
-                    val n = (unifiedQueueIndex + 1) % unifiedQueue.size
-                    unifiedQueueIndex = n
-                    launchUnifiedAudio(unifiedQueue[n])
-                } else controller?.seekToNextMediaItem()
+            val nextUnified: (Boolean) -> Unit = { automatic ->
+                val next = playbackQueue.forward(automatic)
+                if (next != null) {
+                    playbackQueue = next
+                    next.current?.let { launchUnifiedAudio(it) }
+                } else if (playbackQueue.entries.isEmpty() && !automatic) {
+                    controller?.seekToNextMediaItem()
+                } else if (automatic) {
+                    playing = false
+                }
             }
+            val unifiedNext: () -> Unit = { nextUnified(false) }
             val unifiedPrevious: () -> Unit = {
-                if (unifiedQueue.isNotEmpty()) {
-                    val n = if (unifiedQueueIndex <= 0) unifiedQueue.lastIndex else
-                        unifiedQueueIndex - 1
-                    unifiedQueueIndex = n
-                    launchUnifiedAudio(unifiedQueue[n])
+                val previous = playbackQueue.backward()
+                if (previous != null) {
+                    playbackQueue = previous
+                    previous.current?.let { launchUnifiedAudio(it) }
                 } else controller?.seekToPreviousMediaItem()
             }
-            // Advance to the next YouTube/Audius stream when playback finishes.
-            DisposableEffect(controllerReady, unifiedQueue, unifiedQueueIndex) {
-                val active = controller
-                val transition = object : Player.Listener {
-                    override fun onPlaybackStateChanged(state: Int) {
-                        if (state == Player.STATE_ENDED &&
-                            unifiedQueueIndex >= 0 &&
-                            unifiedQueueIndex < unifiedQueue.lastIndex) {
-                            unifiedNext()
-                        }
-                    }
+            SideEffect {
+                latestAutoAdvance.value = { nextUnified(true) }
+                spotifyEngine.onEndOfTrack = { nextUnified(true) }
+                spotifyEngine.onNext = unifiedNext
+                spotifyEngine.onPrevious = unifiedPrevious
+            }
+            DisposableEffect(Unit) {
+                onDispose {
+                    spotifyEngine.onEndOfTrack = null
+                    spotifyEngine.onUnavailable = null
+                    spotifyEngine.onNext = null
+                    spotifyEngine.onPrevious = null
                 }
-                active?.addListener(transition)
-                onDispose { active?.removeListener(transition) }
             }
             val playExternal: (ExternalPlaylistItem) -> Unit = { track ->
-                if (track.source == "youtube") {
-                    playUnified(UnifiedSong(track.id, MusicOrigin.YOUTUBE_MUSIC,
-                        track.title, track.artist, cover = track.artwork), emptyList())
-                } else runCatching {
-                    val active = controller ?: error("Oynatıcı henüz hazır değil")
-                    val item = MediaItem.Builder().setUri(track.playbackUri)
-                        .setMediaMetadata(MediaMetadata.Builder()
-                            .setTitle(track.title).setArtist(track.artist).build())
-                        .build()
-                    active.setMediaItem(item)
-                    active.prepare()
-                    active.play()
-                    selected = Song(Uri.parse(track.playbackUri), track.title, track.artist)
-                    playing = true
-                    error = null
-                }.onFailure { error = it.localizedMessage }
+                val source = when (track.source) {
+                    "youtube" -> MusicOrigin.YOUTUBE_MUSIC
+                    "audius" -> MusicOrigin.AUDIUS
+                    "local" -> MusicOrigin.LOCAL
+                    else -> MusicOrigin.STREAM
+                }
+                val id = if (source == MusicOrigin.LOCAL ||
+                    source == MusicOrigin.STREAM) track.playbackUri else track.id
+                val unified = UnifiedSong(id, source, track.title, track.artist,
+                    cover = track.artwork)
+                playUnified(unified, listOf(unified))
+            }
+            LaunchedEffect(page, playing) {
+                while (page == 9) {
+                    playbackPosition = controller?.currentPosition?.coerceAtLeast(0L) ?: 0L
+                    playbackDuration = controller?.duration?.takeIf { it > 0 } ?: 0L
+                    delay(750)
+                }
             }
             MaterialTheme(colorScheme = darkColorScheme(primary = lime, background = bg, surface = panel)) {
                 Column(Modifier.fillMaxSize().background(bg).statusBarsPadding().navigationBarsPadding()) {
                     Row(Modifier.fillMaxWidth().padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("RESONANCE", color = lime, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp)
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { page = if (page == 3) 5 else 3 }) { Text(if (page == 3) "Geri" else "Spotify hesabı", color = lime) }
+                        if (selected != null || activeUnified != null) {
+                            IconButton(onClick = { page = 9 }) {
+                                Icon(Icons.Rounded.QueueMusic, "Oynatıcı ve sıra", tint = lime)
+                            }
+                        }
+                        TextButton(onClick = { page = if (page == 3) 1 else 3 }) { Text(if (page == 3) "Geri" else "Spotify hesabı", color = lime) }
                         IconButton(onClick = { picker.launch(arrayOf("audio/*")) }) {
                             Icon(Icons.Rounded.LibraryAdd, contentDescription = "Müzik içe aktar", tint = lime)
                         }
                     }
-                    if (page == 3) {
+                    if (page == 9) {
+                        val spotifyPlaying = activeUnified?.source == MusicOrigin.SPOTIFY
+                        NowPlayingScreen(
+                            title = activeUnified?.title ?: selected?.title.orEmpty(),
+                            artist = activeUnified?.artist ?: selected?.artist.orEmpty(),
+                            cover = activeUnified?.cover.orEmpty(),
+                            source = activeUnified?.source?.name ?: "Resonance",
+                            isPlaying = if (spotifyPlaying) spotifyEngine.playing else playing,
+                            positionMs = if (spotifyPlaying) spotifyEngine.positionMs.toLong()
+                                else playbackPosition,
+                            durationMs = if (spotifyPlaying) spotifyEngine.durationMs.toLong()
+                                else playbackDuration,
+                            queue = playbackQueue,
+                            onBack = { page = 1 },
+                            onToggle = {
+                                if (spotifyPlaying) spotifyEngine.toggle()
+                                else controller?.let { if (it.isPlaying) it.pause() else it.play() }
+                            },
+                            onPrevious = unifiedPrevious,
+                            onNext = unifiedNext,
+                            onSeek = { milliseconds ->
+                                if (spotifyPlaying) spotifyEngine.seek(milliseconds.toInt())
+                                else controller?.seekTo(milliseconds)
+                            },
+                            onRepeat = { playbackQueue = playbackQueue.withRepeat(it) },
+                            onShuffle = { playbackQueue = playbackQueue.withShuffle(it) },
+                            onMove = { from, to ->
+                                playbackQueue = playbackQueue.move(from, to)
+                            },
+                            onRemove = { at ->
+                                val removedCurrent = at == playbackQueue.currentIndex
+                                playbackQueue = playbackQueue.remove(at)
+                                if (removedCurrent) playbackQueue.current?.let { launchUnifiedAudio(it) }
+                            },
+                            onSelect = { index ->
+                                playbackQueue = playbackQueue.copy(currentIndex = index)
+                                playbackQueue.current?.let { launchUnifiedAudio(it) }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else if (page == 3) {
                         SpotifyScreen(this@MainActivity, playExternal, onPremiumPlay = { track ->
-                            controller?.pause()
-                            pendingSpotifyPremium = track
-                            page = 6
-                        })
+                            val item = UnifiedSong(track.uri, MusicOrigin.SPOTIFY,
+                                track.title, track.artist, track.durationSeconds)
+                            playUnified(item, listOf(item))
+                        }, onPlayQueue = playUnified)
                     } else if (page == 6) {
                         SpotifyPremiumHostScreen(this@MainActivity, pendingSpotifyPremium,
-                            onBack = { page = 3 }, modifier = Modifier.weight(1f))
+                            onBack = { page = 1 }, modifier = Modifier.weight(1f))
                     } else if (page == 1) {
                         UnifiedSearchScreen(
                             activity = this@MainActivity,
@@ -356,13 +448,17 @@ class MainActivity : ComponentActivity() {
                                     pendingExternal = item.external()
                                 }
                             },
-                            playingTitle = selected?.title,
-                            isPlaying = playing,
+                            playingTitle = activeUnified?.title ?: selected?.title,
+                            isPlaying = if (activeUnified?.source == MusicOrigin.SPOTIFY)
+                                spotifyEngine.playing else playing,
                             onToggle = {
-                                controller?.let { if (it.isPlaying) it.pause() else it.play() }
+                                if (activeUnified?.source == MusicOrigin.SPOTIFY)
+                                    spotifyEngine.toggle()
+                                else controller?.let { if (it.isPlaying) it.pause() else it.play() }
                             },
                             onPrevious = unifiedPrevious,
                             onNext = unifiedNext,
+                            onOpenPlayer = { page = 9 },
                             initialLink = incomingYouTubeUrl,
                             modifier = Modifier.weight(1f)
                         )

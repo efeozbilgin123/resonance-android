@@ -57,6 +57,27 @@ class HybridPlaylistStore(context: Context) {
         }
         return "account:" + accountId + ":playlist:" + playlistId
     }
+    private fun orderKey(accountId: String, playlistId: String): String =
+        "order:" + key(accountId, playlistId)
+
+    /** Only affects Resonance's combined UI, never reorders Spotify's remote list. */
+    @Synchronized
+    fun readOrder(accountId: String, playlistId: String): List<String> {
+        val raw = prefs.getString(orderKey(accountId, playlistId), "[]") ?: "[]"
+        val arr = runCatching { JSONArray(raw) }.getOrDefault(JSONArray())
+        return (0 until arr.length()).mapNotNull { index ->
+            arr.optString(index).takeIf { it.isNotBlank() }
+        }.distinct()
+    }
+
+    @Synchronized
+    fun saveOrder(accountId: String, playlistId: String, order: List<String>) {
+        val array = JSONArray()
+        order.take(10000).distinct().forEach { array.put(it) }
+        check(prefs.edit().putString(orderKey(accountId, playlistId), array.toString())
+            .commit()) { "Liste sırası kaydedilemedi" }
+    }
+
     @Synchronized
     fun entries(accountId: String, playlistId: String): List<ExternalPlaylistItem> {
         val raw = prefs.getString(key(accountId, playlistId), "[]") ?: "[]"
@@ -102,7 +123,10 @@ class HybridPlaylistStore(context: Context) {
             if (!playlistId.matches(Regex("[A-Za-z0-9]+"))) continue
             val items = JSONArray()
             entries(accountId, playlistId).forEach { items.put(it.json()) }
-            lists.put(JSONObject().put("playlistId", playlistId).put("entries", items))
+            val order = JSONArray()
+            readOrder(accountId, playlistId).forEach { order.put(it) }
+            lists.put(JSONObject().put("playlistId", playlistId).put("entries", items)
+                .put("resonanceOrder", order))
         }
         return JSONObject().put("format", "resonance-sidecar-v1")
             .put("accountId", accountId).put("playlists", lists).toString(2)
@@ -136,6 +160,11 @@ class HybridPlaylistStore(context: Context) {
             for (n in 0 until items.length()) {
                 val item = ExternalPlaylistItem.fromJson(items.getJSONObject(n))
                 if (add(accountId, playlistId, item)) imported++
+            }
+            val order = list.optJSONArray("resonanceOrder")
+            if (order != null) {
+                saveOrder(accountId, playlistId, (0 until order.length())
+                    .mapNotNull { order.optString(it).takeIf(String::isNotBlank) })
             }
         }
         return imported

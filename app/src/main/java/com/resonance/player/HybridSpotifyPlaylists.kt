@@ -9,6 +9,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -39,6 +40,7 @@ fun HybridSpotifyPlaylists(
     activity: Activity,
     onExternalPlay: (ExternalPlaylistItem) -> Unit,
     onPremiumPlay: (SpotifyTrack) -> Unit,
+    onPlayQueue: (UnifiedSong, List<UnifiedSong>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val client = remember { SpotifyClient(activity) }
@@ -51,6 +53,7 @@ fun HybridSpotifyPlaylists(
     var playlists by remember { mutableStateOf<List<SpotifyPlaylist>>(emptyList()) }
     var spotifyRows by remember { mutableStateOf<List<SpotifyTrack>>(emptyList()) }
     var externalRows by remember { mutableStateOf<List<ExternalPlaylistItem>>(emptyList()) }
+    var localOrder by remember { mutableStateOf<List<String>>(emptyList()) }
     var found by remember { mutableStateOf<List<SpotifyTrack>>(emptyList()) }
     var mode by remember { mutableStateOf("playlists") }
     var search by remember { mutableStateOf("") }
@@ -143,6 +146,7 @@ fun HybridSpotifyPlaylists(
         val playlist = selected ?: return@LaunchedEffect
         if (accountId.isBlank()) return@LaunchedEffect
         externalRows = local.entries(accountId, playlist.id)
+        localOrder = local.readOrder(accountId, playlist.id)
         busy = true
         try {
             spotifyRows = withContext(Dispatchers.IO) { client.playlistTracks(playlist.id) }
@@ -150,6 +154,19 @@ fun HybridSpotifyPlaylists(
             message = "Spotify parçaları alınamadı: ${e.localizedMessage ?: "Yetki hatası"}"
             spotifyRows = emptyList()
         } finally { busy = false }
+    }
+
+    val merged = remember(spotifyRows, externalRows, localOrder) {
+        HybridPlaylistOrder.merge(spotifyRows, externalRows, localOrder)
+    }
+
+    fun playMixed(row: HybridPlaylistRow) {
+        val target = row.unified()
+        if (target == null) {
+            message = "Bu Spotify yerel dosyası başka cihazda oynatılamaz."
+            return
+        }
+        onPlayQueue(target, merged.mapNotNull { it.unified() })
     }
 
     Column(modifier.fillMaxWidth().background(Color(0xFF080B0A)).padding(horizontal = 16.dp),
@@ -311,79 +328,89 @@ fun HybridSpotifyPlaylists(
                     }
                 } else {
                     item {
-                        Text("Spotify hesabındaki parçalar", color = resonanceAccent,
+                        Text("Karma çalma listen", color = resonanceAccent,
                             fontWeight = FontWeight.Bold)
-                        Text("Bunlar Spotify sunucularında kayıtlı. Yalnızca Spotify Connect ile çalınır.",
-                            color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
-                    }
-                    items(spotifyRows) { track ->
-                        Row(Modifier.fillMaxWidth().background(resonancePanel,
-                            RoundedCornerShape(12.dp)).padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(track.title, color = Color.White, maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis)
-                                Text(track.artist, color = Color.LightGray,
-                                    style = MaterialTheme.typography.bodySmall)
-                            }
-                            IconButton(onClick = { matching = track }) {
-                                Icon(Icons.Rounded.Search,
-                                    "Audius'ta benzer kayıtları ara", tint = resonanceAccent)
-                            }
-                            IconButton(onClick = { onPremiumPlay(track) }) {
-                                Icon(Icons.Rounded.Headphones,
-                                    "Resonance Premium SDK'da çalmayı dene", tint = resonanceAccent)
-                            }
-                            IconButton(onClick = { playOnSpotify(track) }, enabled = !busy) {
-                                Icon(Icons.Rounded.Cast,
-                                    "Spotify Connect'te çal", tint = resonanceAccent)
-                            }
-                            IconButton(onClick = { showSpotifyLink(track) }) {
-                                Icon(Icons.Rounded.OpenInNew,
-                                    "Spotify'da aç", tint = Color.LightGray)
-                            }
+                        Text("Spotify parçaları hesapta, YouTube/Audius/yerel parçalar "
+                                + "Resonance'ta saklanır. Buradaki sıralama yalnızca Resonance içindir.",
+                            color = Color.LightGray,
+                            style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.height(10.dp))
+                        Button(onClick = {
+                            merged.firstOrNull { it.unified() != null }?.let { playMixed(it) }
+                        }, enabled = merged.any { it.unified() != null },
+                            modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Rounded.PlayArrow, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Karma listeyi sırayla çal (${merged.size} parça)")
                         }
                     }
-                    item {
-                        Text("Spotify, YouTube Music ve Audius parçalarını tek arama ekranından bulup + simgesiyle buraya ekleyebilirsin.",
-                            color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
-                    }
-                    item {
-                        Spacer(Modifier.height(12.dp))
-                        Text("Resonance ekleri — yalnız bu cihazda", color = resonanceAccent,
-                            fontWeight = FontWeight.Bold)
-                        Text("YouTube, Audius veya yerel parçalar Spotify hesabına gönderilmez. Videolar resmî YouTube oynatıcısında açılır.",
-                            color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
-                    }
-                    if (externalRows.isEmpty()) {
+                    if (merged.isEmpty()) {
                         item {
-                            Text("Ara sekmesindeki Spotify / YouTube Music / Audius şarkılarından liste simgesine basarak ekleyebilirsin.",
-                                color = Color.LightGray)
+                            Text("Bu listede henüz parça bulunamadı. Ara sekmesinden "
+                                    + "Spotify, YouTube Music veya Audius şarkıları ekleyebilirsin.",
+                                color = Color.LightGray,
+                                style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                    items(externalRows, key = { it.source + ":" + it.id }) { entry ->
+                    itemsIndexed(merged, key = { _, row -> row.key }) { index, row ->
                         Row(Modifier.fillMaxWidth().background(resonancePanel,
-                            RoundedCornerShape(12.dp)).clickable { onExternalPlay(entry) }
-                            .padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RoundedCornerShape(12.dp)).clickable { playMixed(row) }
+                            .padding(horizontal = 7.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text("${index+1}", color = Color.LightGray,
+                                style = MaterialTheme.typography.labelSmall)
+                            Spacer(Modifier.width(8.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(entry.title, color = Color.White, maxLines = 1,
+                                Text(row.title, color = Color.White, maxLines = 1,
                                     overflow = TextOverflow.Ellipsis)
-                                Text(entry.artist + " · " + entry.source.uppercase(),
-                                    color = Color.LightGray,
+                                Text(row.artist, color = Color.LightGray, maxLines = 1,
                                     style = MaterialTheme.typography.bodySmall)
-                            }
-                            IconButton(onClick = { onExternalPlay(entry) }) {
-                                Icon(Icons.Rounded.PlayArrow,
-                                    "Resonance içinde çal", tint = resonanceAccent)
+                                Text(row.origin + if (row.spotify == null)
+                                    " · yalnız Resonance" else " · Spotify hesabında",
+                                    color = resonanceAccent,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1)
                             }
                             IconButton(onClick = {
-                                local.remove(accountId, detail.id, entry)
-                                externalRows = local.entries(accountId, detail.id)
-                            }) {
-                                Icon(Icons.Rounded.RemoveCircleOutline,
-                                    "Resonance ekini kaldır", tint = Color.LightGray)
+                                val newOrder = HybridPlaylistOrder.swap(merged,index,index-1)
+                                local.saveOrder(accountId, detail.id, newOrder)
+                                localOrder = newOrder
+                            }, enabled = index > 0, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Rounded.KeyboardArrowUp,
+                                    "Yukarı taşı", tint = Color.LightGray)
+                            }
+                            IconButton(onClick = {
+                                val newOrder = HybridPlaylistOrder.swap(merged,index,index+1)
+                                local.saveOrder(accountId, detail.id, newOrder)
+                                localOrder = newOrder
+                            }, enabled = index < merged.lastIndex,
+                                modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Rounded.KeyboardArrowDown,
+                                    "Aşağı taşı", tint = Color.LightGray)
+                            }
+                            if (row.external != null) {
+                                IconButton(onClick = {
+                                    local.remove(accountId, detail.id, row.external)
+                                    externalRows = local.entries(accountId, detail.id)
+                                }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Rounded.Close,
+                                        "Resonance ekini kaldır", tint = Color.LightGray)
+                                }
+                            } else {
+                                IconButton(onClick = {
+                                    row.spotify?.let { matching = it }
+                                }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Rounded.Search,
+                                        "Benzer dış kaynak bul", tint = Color.LightGray)
+                                }
                             }
                         }
+                    }
+                    item {
+                        Text("İstediğin şarkıyı ana aramada bulup + simgesiyle ekleyebilirsin. "
+                                + "YouTube kaynakları gayriresmîdir; bazı kayıtlar açılamayabilir.",
+                            color = Color.LightGray,
+                            style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

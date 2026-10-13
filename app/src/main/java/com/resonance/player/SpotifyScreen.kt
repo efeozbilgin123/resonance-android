@@ -29,7 +29,8 @@ private data class SpotifyRow(val name: String, val sub: String, val uri: String
 fun SpotifyScreen(
     activity: Activity,
     onExternalPlay: (ExternalPlaylistItem) -> Unit = {},
-    onPremiumPlay: (SpotifyTrack) -> Unit = {}
+    onPremiumPlay: (SpotifyTrack) -> Unit = {},
+    onPlayQueue: (UnifiedSong, List<UnifiedSong>) -> Unit = { _, _ -> }
 ) {
     var showHybrid by remember { mutableStateOf(true) }
     if (showHybrid) {
@@ -37,7 +38,7 @@ fun SpotifyScreen(
             TextButton(onClick = { showHybrid = false }) {
                 Text("Spotify Connect kontrolleri (aktif Spotify cihazı gerektirir)")
             }
-            HybridSpotifyPlaylists(activity, onExternalPlay, onPremiumPlay, Modifier.weight(1f))
+            HybridSpotifyPlaylists(activity, onExternalPlay, onPremiumPlay, onPlayQueue, Modifier.weight(1f))
         }
         return
     }
