@@ -72,8 +72,9 @@ object AudiusCatalog {
                     AudiusTrack(
                         id = id,
                         title = track.optString("title").ifBlank { "Adsız parça" },
-                        artist = user?.optString("name")?.ifBlank { user.optString("handle") }
-                            ?: "Bilinmeyen sanatçı",
+                        artist = user?.optString("name").orEmpty()
+                            .ifBlank { user?.optString("handle").orEmpty() }
+                            .ifBlank { "Bilinmeyen sanatçı" },
                         genre = track.optString("genre"),
                         duration = track.optInt("duration"),
                         artwork = artwork
