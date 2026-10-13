@@ -410,7 +410,7 @@ class MainActivity : ComponentActivity() {
                             val item = UnifiedSong(track.uri, MusicOrigin.SPOTIFY,
                                 track.title, track.artist, track.durationSeconds)
                             playUnified(item, listOf(item))
-                        })
+                        }, onPlayQueue = playUnified)
                     } else if (page == 6) {
                         SpotifyPremiumHostScreen(this@MainActivity, pendingSpotifyPremium,
                             onBack = { page = 1 }, modifier = Modifier.weight(1f))
