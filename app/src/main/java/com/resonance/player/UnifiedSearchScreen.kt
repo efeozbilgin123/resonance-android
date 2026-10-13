@@ -25,6 +25,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val searchAccent = Color(0xFFC6F17B)
 private val searchPanel = Color(0xFF171D19)
@@ -58,6 +60,63 @@ fun UnifiedSearchScreen(
     var importVideo by remember { mutableStateOf<String?>(null) }
     var warning by remember { mutableStateOf("") }
     var requestKey by remember { mutableIntStateOf(0) }
+    var premiumAccount by remember { mutableStateOf<Boolean?>(null) }
+    var choosingAlternativeFor by remember { mutableStateOf<UnifiedMusicTrack?>(null) }
+    var alternatives by remember { mutableStateOf<List<UnifiedMusicTrack>>(emptyList()) }
+    var alternativesBusy by remember { mutableStateOf(false) }
+    var alternativeError by remember { mutableStateOf("") }
+
+    LaunchedEffect(client.authorized) {
+        if (!client.authorized) return@LaunchedEffect
+        premiumAccount = withContext(Dispatchers.IO) {
+            runCatching { client.get("/me").optString("product") == "premium" }.getOrNull()
+        }
+    }
+
+    LaunchedEffect(choosingAlternativeFor?.id) {
+        val original = choosingAlternativeFor ?: return@LaunchedEffect
+        alternativesBusy = true
+        alternativeError = ""
+        alternatives = emptyList()
+        try {
+            val results = withContext(Dispatchers.IO) {
+                YouTubeMusicProvider.search("${original.title} ${original.artist}")
+            }
+            alternatives = results.map { record ->
+                UnifiedMusicTrack(record.videoId, record.title, record.artist,
+                    record.durationSeconds, record.artwork, CatalogSource.YOUTUBE,
+                    record.musicLikelihood, record.musicLikelihood > 0.9)
+            }.sortedByDescending { RelevanceRanker.crossSourceScore(original, it) }.take(10)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            alternativeError = e.localizedMessage ?: "YouTube Music araması başarısız"
+        } finally {
+            alternativesBusy = false
+        }
+    }
+
+    fun playSelected(track: UnifiedMusicTrack) {
+        if (track.source == CatalogSource.YOUTUBE) {
+            onYouTubePlay(track, data.tracks)
+            return
+        }
+        if (premiumAccount == true) {
+            track.spotifyItem()?.let(onSpotifyPlay)
+            return
+        }
+        val best = data.tracks
+            .asSequence().filter { it.source == CatalogSource.YOUTUBE }
+            .map { it to RelevanceRanker.crossSourceScore(track, it) }
+            .maxByOrNull { it.second }
+        if (best != null && best.second >= 0.78) {
+            onYouTubePlay(best.first, data.tracks)
+        } else {
+            // Never silently substitute an unverified cover or unrelated song.
+            choosingAlternativeFor = track
+        }
+    }
+
 
     LaunchedEffect(incomingUrl) {
         if (!incomingUrl.isNullOrBlank()) {
@@ -172,10 +231,7 @@ fun UnifiedSearchScreen(
                     val youtube = track.source == CatalogSource.YOUTUBE
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp))
                         .background(searchPanel)
-                        .clickable {
-                            if (youtube) onYouTubePlay(track, data.tracks)
-                            else track.spotifyItem()?.let(onSpotifyPlay)
-                        }
+                        .clickable { playSelected(track) }
                         .padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(54.dp).clip(RoundedCornerShape(9.dp))) {
                             if (track.cover.startsWith("https://")) {
@@ -222,16 +278,61 @@ fun UnifiedSearchScreen(
                             Icon(Icons.Rounded.PlaylistAdd,
                                 "Seçili parçayı listeye ekle", tint = searchAccent)
                         }
-                        IconButton(onClick = {
-                            if (youtube) onYouTubePlay(track, data.tracks)
-                            else track.spotifyItem()?.let(onSpotifyPlay)
-                        }) {
-                            Icon(Icons.Rounded.PlayArrow, "Dinle", tint = searchAccent)
+                        IconButton(onClick = { playSelected(track) }) {
+                            Icon(Icons.Rounded.PlayArrow,
+                                if (youtube) "YouTube müziğini çal"
+                                else if (premiumAccount == true) "Spotify Premium'dan çal"
+                                else "YouTube Music'te doğru kaydı eşleştir",
+                                tint = searchAccent)
                         }
                     }
                 }
             }
         }
+    }
+    choosingAlternativeFor?.let { original ->
+        AlertDialog(
+            onDismissRequest = { choosingAlternativeFor = null },
+            title = { Text("YouTube Music kaydını seç") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${original.title} — ${original.artist}",
+                        style = MaterialTheme.typography.titleSmall)
+                    Text("Spotify Premium bağlantısı bulunamadı. Aynı şarkının YouTube Music karşılığını seç; canlı/cover kayıtlar otomatik seçilmez.",
+                        style = MaterialTheme.typography.bodySmall)
+                    if (alternativesBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (alternativeError.isNotBlank()) {
+                        Text(alternativeError, color = MaterialTheme.colorScheme.error)
+                    }
+                    LazyColumn(Modifier.heightIn(max = 350.dp)) {
+                        items(alternatives, key = { it.id }) { candidate ->
+                            val score = RelevanceRanker.crossSourceScore(original, candidate)
+                            TextButton(onClick = {
+                                onYouTubePlay(candidate, listOf(candidate) + alternatives
+                                    .filterNot { it.id == candidate.id })
+                                choosingAlternativeFor = null
+                            }) {
+                                Column(Modifier.fillMaxWidth()) {
+                                    Text(candidate.title, maxLines = 1)
+                                    Text("${candidate.artist} · Eşleşme %${(score * 100).toInt()}",
+                                        style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    original.spotifyItem()?.let(onSpotifyPlay)
+                    choosingAlternativeFor = null
+                }) { Text("Spotify Premium dene") }
+            },
+            dismissButton = {
+                TextButton(onClick = { choosingAlternativeFor = null }) { Text("Vazgeç") }
+            }
+        )
     }
     importVideo?.let { url ->
         YouTubeImportDialog(initialUrl = url,
