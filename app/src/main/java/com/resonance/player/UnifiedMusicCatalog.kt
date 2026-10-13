@@ -153,7 +153,7 @@ class YouTubeAudioProvider(context: Context) {
         } finally { c.disconnect() }
     }
 
-    fun search(query: String): List<UnifiedSong> {
+    fun search(query: String, videosOnly: Boolean = false): List<UnifiedSong> {
         require(query.isNotBlank())
         var last: Exception? = null
         // Prefer direct YouTube Music Songs results without depending on
@@ -161,7 +161,8 @@ class YouTubeAudioProvider(context: Context) {
         // existing Piped/Invidious fallback still works.
         if (preferredServer.isBlank()) {
             try {
-                val local = YouTubeMusicProvider.search(query.trim()).map {
+                val local = (if (videosOnly) YouTubeMusicProvider.searchVideos(query.trim())
+                    else YouTubeMusicProvider.search(query.trim())).map {
                     UnifiedSong(it.videoId, MusicOrigin.YOUTUBE_MUSIC,
                         it.title, it.artist, it.durationSeconds, it.artwork)
                 }
@@ -174,7 +175,8 @@ class YouTubeAudioProvider(context: Context) {
         for (base in bases()) {
             try {
                 val piped = base.contains("piped")
-                val path = if (piped) "/search?q=$q&filter=music_songs" else
+                val path = if (piped) "/search?q=$q&filter=" +
+                    (if (videosOnly) "videos" else "music_songs") else
                     "/api/v1/search?q=$q&type=video"
                 val response = api(base, path)
                 val json = if (piped) JSONObject(response).optJSONArray("items")
@@ -305,6 +307,9 @@ class UnifiedMusicCatalog(private val context: Context, private val spotify: Spo
     }
 
     fun searchYouTube(query: String): List<UnifiedSong> = youtube.search(query)
+
+    fun searchYouTubeVideos(query: String): List<UnifiedSong> =
+        youtube.search(query, videosOnly = true)
 
     fun searchAudius(query: String): List<UnifiedSong> =
         AudiusCatalog.fetch(query).take(15).map {
