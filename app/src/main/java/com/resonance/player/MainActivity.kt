@@ -355,20 +355,65 @@ class MainActivity : ComponentActivity() {
                     Row(Modifier.fillMaxWidth().padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("RESONANCE", color = lime, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp)
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { page = if (page == 3) 5 else 3 }) { Text(if (page == 3) "Geri" else "Spotify hesabı", color = lime) }
+                        if (selected != null || activeUnified != null) {
+                            IconButton(onClick = { page = 9 }) {
+                                Icon(Icons.Rounded.QueueMusic, "Oynatıcı ve sıra", tint = lime)
+                            }
+                        }
+                        TextButton(onClick = { page = if (page == 3) 1 else 3 }) { Text(if (page == 3) "Geri" else "Spotify hesabı", color = lime) }
                         IconButton(onClick = { picker.launch(arrayOf("audio/*")) }) {
                             Icon(Icons.Rounded.LibraryAdd, contentDescription = "Müzik içe aktar", tint = lime)
                         }
                     }
-                    if (page == 3) {
+                    if (page == 9) {
+                        val spotifyPlaying = activeUnified?.source == MusicOrigin.SPOTIFY
+                        NowPlayingScreen(
+                            title = activeUnified?.title ?: selected?.title.orEmpty(),
+                            artist = activeUnified?.artist ?: selected?.artist.orEmpty(),
+                            cover = activeUnified?.cover.orEmpty(),
+                            source = activeUnified?.source?.name ?: "Resonance",
+                            isPlaying = if (spotifyPlaying) spotifyEngine.playing else playing,
+                            positionMs = if (spotifyPlaying) spotifyEngine.positionMs.toLong()
+                                else playbackPosition,
+                            durationMs = if (spotifyPlaying) spotifyEngine.durationMs.toLong()
+                                else playbackDuration,
+                            queue = playbackQueue,
+                            onBack = { page = 1 },
+                            onToggle = {
+                                if (spotifyPlaying) spotifyEngine.toggle()
+                                else controller?.let { if (it.isPlaying) it.pause() else it.play() }
+                            },
+                            onPrevious = unifiedPrevious,
+                            onNext = unifiedNext,
+                            onSeek = { milliseconds ->
+                                if (spotifyPlaying) spotifyEngine.seek(milliseconds.toInt())
+                                else controller?.seekTo(milliseconds)
+                            },
+                            onRepeat = { playbackQueue = playbackQueue.withRepeat(it) },
+                            onShuffle = { playbackQueue = playbackQueue.withShuffle(it) },
+                            onMove = { from, to ->
+                                playbackQueue = playbackQueue.move(from, to)
+                            },
+                            onRemove = { at ->
+                                val removedCurrent = at == playbackQueue.currentIndex
+                                playbackQueue = playbackQueue.remove(at)
+                                if (removedCurrent) playbackQueue.current?.let { launchUnifiedAudio(it) }
+                            },
+                            onSelect = { index ->
+                                playbackQueue = playbackQueue.copy(currentIndex = index)
+                                playbackQueue.current?.let { launchUnifiedAudio(it) }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else if (page == 3) {
                         SpotifyScreen(this@MainActivity, playExternal, onPremiumPlay = { track ->
-                            controller?.pause()
-                            pendingSpotifyPremium = track
-                            page = 6
+                            val item = UnifiedSong(track.uri, MusicOrigin.SPOTIFY,
+                                track.title, track.artist, track.durationSeconds)
+                            playUnified(item, listOf(item))
                         })
                     } else if (page == 6) {
                         SpotifyPremiumHostScreen(this@MainActivity, pendingSpotifyPremium,
-                            onBack = { page = 3 }, modifier = Modifier.weight(1f))
+                            onBack = { page = 1 }, modifier = Modifier.weight(1f))
                     } else if (page == 1) {
                         UnifiedSearchScreen(
                             activity = this@MainActivity,
@@ -380,13 +425,17 @@ class MainActivity : ComponentActivity() {
                                     pendingExternal = item.external()
                                 }
                             },
-                            playingTitle = selected?.title,
-                            isPlaying = playing,
+                            playingTitle = activeUnified?.title ?: selected?.title,
+                            isPlaying = if (activeUnified?.source == MusicOrigin.SPOTIFY)
+                                spotifyEngine.playing else playing,
                             onToggle = {
-                                controller?.let { if (it.isPlaying) it.pause() else it.play() }
+                                if (activeUnified?.source == MusicOrigin.SPOTIFY)
+                                    spotifyEngine.toggle()
+                                else controller?.let { if (it.isPlaying) it.pause() else it.play() }
                             },
                             onPrevious = unifiedPrevious,
                             onNext = unifiedNext,
+                            onOpenPlayer = { page = 9 },
                             initialLink = incomingYouTubeUrl,
                             modifier = Modifier.weight(1f)
                         )
