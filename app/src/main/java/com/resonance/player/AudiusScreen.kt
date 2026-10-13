@@ -18,6 +18,7 @@ import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,7 +36,8 @@ private val tile = Color(0xFF171D19)
 
 @Composable
 fun AudiusScreen(activity: Activity, onPlay: (AudiusTrack, List<AudiusTrack>) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onAddExternal: (ExternalPlaylistItem) -> Unit = {}
 ) {
     val prefs = remember { activity.getSharedPreferences("audius_favorites", Context.MODE_PRIVATE) }
     var favoritesRaw by remember { mutableStateOf(prefs.getStringSet("tracks", emptySet()).orEmpty().toSet()) }
@@ -145,7 +147,9 @@ fun AudiusScreen(activity: Activity, onPlay: (AudiusTrack, List<AudiusTrack>) ->
                         Icon(if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                             contentDescription = "Beğen", tint = if (liked) accentGreen else Color.Gray)
                     }
-                    Icon(Icons.Rounded.PlayArrow, null, tint = accentGreen)
+                    IconButton(onClick = { onAddExternal(ExternalPlaylistItem.fromAudius(song)) }) {
+                        Icon(Icons.Rounded.PlaylistAdd, contentDescription = "Spotify listesine Resonance eki olarak ekle", tint = accentGreen)
+                    }
                 }
             }
         }

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta http-equiv="Content-Security-Policy" content="base-uri 'self'; object-src 'none'; frame-ancestors 'none'"/>
+<title>Resonance Premium · Spotify Web Playback SDK</title>
+<style>
+:root { color-scheme:dark; font-family:system-ui,Roboto,sans-serif; }
+body { margin:0; padding:18px; background:#080b0a; color:#fff; }
+h1 { font-size:21px; margin:8px 0; }
+p { color:#aab5ab; font-size:13px; line-height:1.5; }
+button { background:#c6f17b; color:#081006; border:0; border-radius:12px;
+ padding:15px 18px; font-weight:700; font-size:14px; margin:7px 6px 7px 0; }
+button:disabled { opacity:.4; }
+#status,#track { margin:16px 0; background:#1b221d; border-radius:14px; padding:14px; }
+#track { font-weight:600; min-height:26px; }
+small {color:#b9cbb8;}
+</style>
+<script>
+"use strict";
+let spotifyPlayer = null;
+let currentToken = "";
+let deviceId = "";
+const $ = id => document.getElementById(id);
+const status = value => { const el = $("status"); if(el) el.textContent=value; };
+const emit = (name,value) => console.log("RESONANCE_SDK_"+name+":"+String(value).slice(0,300));
+window.resonanceSetToken = function(t) {
+  if (typeof t === "string" && t.length > 12) {
+    currentToken = t;
+    status("Spotify oturumu hazır. Oynatıcıyı etkinleştir.");
+  }
+};
+window.onSpotifyWebPlaybackSDKReady = () => {
+  try {
+    spotifyPlayer = new Spotify.Player({
+      name: "Resonance Premium (Web SDK)",
+      getOAuthToken: cb => {
+        if(!currentToken) { status("Spotify erişim bilgisi bekleniyor. Tekrar dene."); return; }
+        cb(currentToken);
+      },
+      volume: 0.7
+    });
+    spotifyPlayer.addListener("ready", ({device_id}) => {
+      deviceId=device_id;
+      status("Spotify cihazı hazır. Aşağıdaki parça çalma düğmesine basabilirsin.");
+      emit("READY",device_id);
+    });
+    spotifyPlayer.addListener("not_ready", ({device_id}) => {
+      status("Spotify cihazı bağlantıyı kaybetti.");
+      emit("OFFLINE",device_id);
+    });
+    ["initialization_error","authentication_error","account_error","playback_error","autoplay_failed"].forEach(event => {
+      spotifyPlayer.addListener(event, data => {
+        const msg = (data && data.message) || event;
+        status("Spotify Web SDK: " + msg);
+        emit("ERROR", event+": "+msg);
+      });
+    });
+    spotifyPlayer.addListener("player_state_changed", state => {
+      if (!state || !state.track_window) return;
+      const tr = state.track_window.current_track;
+      if (!tr) return;
+      $("track").textContent = tr.name + " — " +
+        (tr.artists || []).map(a=>a.name).join(", ");
+    });
+    status("Spotify SDK yüklendi. Etkinleştir düğmesine dokun.");
+  } catch(e) {
+    status("Spotify SDK başlatılamadı: " + (e.message||e));
+    emit("ERROR",e.message||e);
+  }
+};
+async function connectSpotify() {
+  try {
+    if (!spotifyPlayer) {status("Spotify SDK henüz yüklenmedi."); return;}
+    if (!currentToken) {status("Spotify'a önce Resonance üzerinden giriş yap."); return;}
+    if (spotifyPlayer.activateElement) await spotifyPlayer.activateElement();
+    const ok = await spotifyPlayer.connect();
+    if (!ok) {status("Spotify SDK bağlantısı başarısız. WebView DRM desteği bulunmayabilir.");}
+    else status("Spotify Web SDK bağlandı; cihaz kimliği bekleniyor...");
+  } catch (e) {
+    status("Bağlantı hatası: " + (e.message||e));
+    emit("ERROR",e.message||e);
+  }
+}
+async function togglePlayback() {
+  try {
+    if (!spotifyPlayer) return;
+    if (spotifyPlayer.activateElement) await spotifyPlayer.activateElement();
+    await spotifyPlayer.togglePlay();
+  } catch(e) {status("Oynatma hatası: " + (e.message||e));}
+}
+</script>
+<script src="https://sdk.scdn.co/spotify-player.js" async></script>
+</head>
+<body>
+<h1>Spotify Premium oynatıcı</h1>
+<p>Resmî Web Playback SDK Spotify akışını kullanır. Spotify uygulaması gerekmez;
+ancak Premium hesabı, streaming izni ve Android WebView'ın korumalı medya (DRM) desteği gerekir.</p>
+<div id="status">Spotify SDK yükleniyor...</div>
+<button onclick="connectSpotify()">Oynatıcıyı etkinleştir</button>
+<button onclick="togglePlayback()">Çal / duraklat</button>
+<div id="track">Henüz bir parça çalmıyor</div>
+<small>Bu oynatıcı deneyseldir. WebView desteklemezse Android Chrome üzerinden Spotify web oynatıcıyı aç.</small>
+</body>
+</html>

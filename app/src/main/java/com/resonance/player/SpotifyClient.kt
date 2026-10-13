@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import org.json.JSONObject
+import org.json.JSONArray
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -20,8 +21,16 @@ import java.util.Base64
 /**
  * Spotify Web API client with Authorization Code + PKCE.
  * No client secret is ever used or embedded into the APK.
- * Spotify playback happens on an authorized Spotify Connect device.
+ * Spotify playback commands require an authorized Spotify Connect device.
+ * This client cannot return Spotify song audio bytes.
  */
+data class SpotifyPlaylist(val id: String, val name: String, val editable: Boolean)
+
+data class SpotifyTrack(
+    val uri: String, val title: String, val artist: String, val local: Boolean,
+    val durationSeconds: Int = 0
+)
+
 class SpotifyClient(private val activity: Activity) {
     companion object {
         const val CALLBACK = "http://127.0.0.1:43892/callback"
@@ -38,12 +47,15 @@ class SpotifyClient(private val activity: Activity) {
     private var refreshToken = pref.getString("refresh_token", "") ?: ""
     private var expiration = pref.getLong("expires_at", 0L)
 
+    val cachedAccountId: String get() = pref.getString("account_id", "") ?: ""
+
     val authorized: Boolean
         get() = accessToken.isNotBlank() || refreshToken.isNotBlank()
 
     fun logout() {
         accessToken = ""; refreshToken = ""; expiration = 0L
-        pref.edit().remove("access_token").remove("refresh_token").remove("expires_at").apply()
+        pref.edit().remove("access_token").remove("refresh_token")
+            .remove("expires_at").remove("account_id").apply()
     }
 
     fun login(done: (String?) -> Unit) {
@@ -60,7 +72,7 @@ class SpotifyClient(private val activity: Activity) {
                     )
                     val scope = "user-read-private user-read-email playlist-read-private " +
                         "playlist-read-collaborative user-library-read user-read-playback-state " +
-                        "user-modify-playback-state"
+                        "user-modify-playback-state playlist-modify-public playlist-modify-private streaming"
                     val authUrl = "https://accounts.spotify.com/authorize?" + form(mapOf(
                         "client_id" to id, "response_type" to "code", "redirect_uri" to CALLBACK,
                         "scope" to scope, "code_challenge_method" to "S256",
@@ -91,6 +103,7 @@ class SpotifyClient(private val activity: Activity) {
                         val res = tokenRequest(mapOf("grant_type" to "authorization_code", "code" to code,
                             "redirect_uri" to CALLBACK, "client_id" to id, "code_verifier" to secret))
                         storeTokens(res)
+                        ensureAccountId()
                     }
                 }
                 activity.runOnUiThread { done(null) }
@@ -118,9 +131,88 @@ class SpotifyClient(private val activity: Activity) {
             .putLong("expires_at", expiration).apply()
     }
 
+    /** Used only by the experimental trusted local Web Playback SDK page. */
+    fun webPlaybackToken(): String = validToken()
+
     fun get(path: String): JSONObject = api("GET", path)
     fun put(path: String, body: JSONObject? = null) = api("PUT", path, body)
-    fun post(path: String) = api("POST", path)
+    fun post(path: String, body: JSONObject? = null) = api("POST", path, body)
+
+    /**
+     * Stable, pseudoanonymous account ID prevents sidecars being shown under the wrong account.
+     * Throws on auth/API error rather than silently using a shared placeholder key.
+     */
+    @Synchronized
+    fun ensureAccountId(): String {
+        val cached = cachedAccountId
+        if (cached.isNotBlank()) return cached
+        val profile = get("/me")
+        val id = profile.optString("account_id").ifBlank { profile.optString("id") }
+        check(id.isNotBlank()) { "Spotify hesap kimliği alınamadı" }
+        pref.edit().putString("account_id", id).apply()
+        return id
+    }
+
+    fun playlists(): List<SpotifyPlaylist> {
+        val self = get("/me").optString("id")
+        val results = mutableListOf<SpotifyPlaylist>()
+        var offset = 0
+        while (offset < 200) {
+            val data = get("/me/playlists?limit=50&offset=$offset")
+            val arr = data.optJSONArray("items") ?: JSONArray()
+            for (i in 0 until arr.length()) {
+                val p = arr.optJSONObject(i) ?: continue
+                val id = p.optString("id")
+                if (id.isBlank()) continue
+                val owner = p.optJSONObject("owner")?.optString("id") ?: ""
+                val editable = owner == self || p.optBoolean("collaborative")
+                results += SpotifyPlaylist(id, p.optString("name").ifBlank { "Adsız liste" }, editable)
+            }
+            if (arr.length() < 50) break
+            offset += arr.length()
+        }
+        return results
+    }
+
+    fun playlistTracks(playlistId: String): List<SpotifyTrack> {
+        require(playlistId.matches(Regex("[A-Za-z0-9]+"))) { "Geçersiz Spotify liste kimliği" }
+        val result = mutableListOf<SpotifyTrack>()
+        var offset = 0
+        while (offset < 400) {
+            val data = get("/playlists/$playlistId/items?limit=50&offset=$offset")
+            val arr = data.optJSONArray("items") ?: JSONArray()
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val track = item.optJSONObject("item") ?: item.optJSONObject("track") ?: continue
+                val artists = track.optJSONArray("artists")
+                val artist = artists?.optJSONObject(0)?.optString("name") ?: ""
+                val uri = track.optString("uri")
+                val isLocal = item.optBoolean("is_local") || track.optBoolean("is_local")
+                result += SpotifyTrack(uri, track.optString("name").ifBlank { "Adsız şarkı" },
+                    artist, isLocal, track.optInt("duration_ms") / 1000)
+            }
+            if (arr.length() < 50) break
+            offset += arr.length()
+        }
+        return result
+    }
+
+    fun addSpotifyTrack(playlistId: String, trackUri: String) {
+        require(playlistId.matches(Regex("[A-Za-z0-9]+"))) { "Geçersiz Spotify liste kimliği" }
+        require(trackUri.matches(Regex("spotify:track:[A-Za-z0-9]+"))) {
+            "Yalnızca Spotify kataloğundaki parçalar Spotify'a kaydedilebilir"
+        }
+        post("/playlists/$playlistId/items", JSONObject().put("uris", JSONArray().put(trackUri)))
+    }
+
+    fun createPlaylist(name: String): SpotifyPlaylist {
+        val title = name.trim()
+        require(title.isNotBlank() && title.length <= 100) { "Liste adı 1-100 karakter olmalı" }
+        val result = post("/me/playlists", JSONObject().put("name", title).put("public", false)
+            .put("description", "Resonance ile oluşturuldu"))
+        val id = result.getString("id")
+        return SpotifyPlaylist(id, result.optString("name", title), true)
+    }
 
     private fun api(method: String, path: String, body: JSONObject? = null): JSONObject {
         val c = URL(API + path).openConnection() as HttpURLConnection

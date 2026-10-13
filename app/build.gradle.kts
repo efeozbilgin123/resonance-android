@@ -10,8 +10,8 @@ android {
         applicationId = "com.resonance.player"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.5.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -20,6 +20,8 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
+    implementation("androidx.webkit:webkit:1.14.0")
+    testImplementation("junit:junit:4.13.2")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.concurrent:concurrent-futures:1.2.0")
     implementation("androidx.media3:media3-exoplayer:1.8.0")

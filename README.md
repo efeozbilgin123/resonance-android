@@ -1,50 +1,79 @@
-# Resonance Android
+# Resonance Android v0.5 (beta)
 
-**Bağımsız, yerel ve çevrimiçi müzik oynatıcı — Kotlin/Jetpack Compose + Rust + Media3.**
+Independent Android audio player in Kotlin / Jetpack Compose, Media3, and Rust JNI.
 
-Resonance, Spotify uygulaması yüklü olmadan ses çalabilir. Ancak **Spotify'ın tüm
-ticari müzik kataloğuna erişim sağlamaz**. Spotify'ın resmî Web API'si üçüncü taraflara
-tüm şarkıların ham ses akışlarını sunmaz; Spotify Free için böyle bir çözüm vaat edilmez.
+> **Not a full Spotify replacement.** Spotify does not expose arbitrary master
+> audio streams to independent Android apps. Spotify Free cannot be made to
+> stream Spotify's full catalogue through the Web API. The official Spotify
+> Web Playback SDK requires Premium and compatible DRM-enabled browser support.
+> Third-party clients that mimic Spotify and combine its content with another
+> service can violate the Spotify Developer Policy.
 
-## Kullanılabilir müzik kaynakları
+## Supported functionality
 
-- **Müzik (Audius):** Audius'un halka açık içeriklerinde gerçek parça arama, türlere
-  göre keşif, tam parça akışı, sıra halinde oynatma, beğenilenler.
-- **Radyo (Radio Browser):** Türkiye ve uluslararası canlı istasyon araması,
-  pop, rock, elektronik, caz kategorileri, favoriler.
-- **Yerel:** Android sistem dosya seçicisinden MP3/FLAC vb. ses dosyaları
-  ekleme, metadata ve yerel favoriler.
-- **İzinli URL:** HTTPS ses adresi girerek doğrudan oynatma.
-- **Spotify hesabı (opsiyonel):** Spotify Web API aracılığıyla OAuth PKCE giriş,
-  kütüphane ve arama. Spotify Connect kontrolleri bağımsız oynatma değildir;
-  ayrıca başka bir Spotify oynatma cihazı ve yetkili hesap gerektirir.
+- **Independent music:** Browse, search, and play on-demand tracks from
+  [Audius](https://docs.audius.co/api/), with artwork and favorites.
+- **Radio:** Browse free live radio stations via Radio Browser, with favorites.
+- **Local files:** Import permitted audio using the Android storage picker.
+- **Spotify account (optional):** PKCE OAuth using your own Client ID;
+  read your playlists, browse Spotify songs, create Spotify playlists,
+  **add Spotify catalogue tracks** to editable Spotify playlists. Those
+  Spotify catalogue additions **are persisted to your Spotify account**.
+- **Linked external extras:** Attach Audius or local songs to a Spotify playlist
+  in a **separate local section** of Resonance. These entries **are not
+  stored on Spotify servers** and **will not appear in the Spotify client**.
+  Every entry is keyed to a specific Spotify account and playlist ID.
+- **Spotube-inspired discovery:** On demand, display possible Audius versions
+  for a Spotify song using title, performer, duration. Candidate matching is
+  heuristic, may be wrong, never auto-plays, and the user chooses the external
+  audio source. Spotify audio is never extracted by this mechanism.
+- **Portable sidecar backups:** Export/import the on-device external playlist
+  extras in JSON. Backup contains playlist metadata, not Spotify credentials.
+  Local file URIs are **not portable** to another phone.
+- **Spotify Premium audio (experimental):** Embedded official Web Playback SDK
+  served from a trusted local HTTPS WebViewAssetLoader origin. This *might not
+  work* on Android WebView if EME DRM is unavailable. There is a button to
+  open the **official Spotify Web Player in a supported Android browser**.
+  No Spotify app is needed for the browser route. The older Spotify Connect
+  control is also provided but requires an active Spotify playback device.
+- **Android Media3:** Independent audio with background MediaSessionService,
+  headset/lockscreen controls, and Rust queue-policy library.
 
-## Mimari
+## Spotify authorization
 
-- **Kotlin ve Jetpack Compose:** Android ekranları, hesap ve cihaz entegrasyonu.
-- **Media3 ExoPlayer + MediaSessionService:** AAC/MP3/HLS akışları, çalma sırası,
-  kilit ekranı/medya bildirimi ve Bluetooth üzerinden kontrol.
-- **Rust JNI kütüphanesi:** Sıra/shuffle/repeat kararlarını hesaplayan çekirdek.
-  Ses codec/çıkışı şu anda Media3 içindedir; Rust kütüphanesi oynatma
-  servisinin yerine geçtiği iddiasında bulunulmaz.
-- **API'ler:** https://docs.audius.co/api/ ve https://docs.radio-browser.info/
+Create your app in [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
+Select Web API and register the *exact* redirect URI:
 
-Üçüncü taraf katalogların ve yayınların sağlıklı çalışması internet bağlantısına,
-servislerin erişilebilirliğine ve kaynak sahiplerinin izinlerine bağlıdır.
-Bazı radyo yayınları HTTP üzerinden hizmet verir; bu sebeple canlı radyo için
-Android uygulamasında cleartext trafiğine izin verilmiştir. HTTP şifreli değildir.
+`http://127.0.0.1:43892/callback`
 
-## APK derleme
+Enter the Client ID in Resonance > Spotify. New playlist modification and Web
+Playback SDK features need additional OAuth scopes:
+`playlist-modify-public`, `playlist-modify-private`, `streaming`.
+**Use Spotify izinlerini yenile / hesap değiştir** to sign in again and
+authorize any newly requested scopes. Developer Mode permissions, approved
+users, subscriptions, markets and API access restrictions still apply.
 
-[Bağımsız Android iş akışı](../../actions/workflows/build-independent-android.yml)
-GitHub Actions üzerinde Android NDK ile Rust JNI'yi derler, Rust testlerini çalıştırır
-ve Android APK'yı üretir. Başarılı çalışmanın **Artifacts** bölümündeki
-`Resonance-Independent-Android-v0.4` ZIP'i açın ve `app-debug.apk` dosyasını kurun.
-Bu bir **debug APK**'dır; Google Play için imzalı yayın paketi değildir.
+## Important Spotify limitation
 
-## Yasal ve ürün sınırları
+Spotify's official API accepts Spotify track/episode URIs for playlist insertion
+and **cannot add local or Audius files as real Spotify playlist items**.
+Spotify Desktop can add local files manually in its own UI, but this is not
+supported as a playlist-insertion operation by the Web API.
+Resonance NEVER marks locally attached audio as synced to Spotify.
 
-Bu ürün Spotify markasının resmî istemcisi değildir. Spotify'daki metadata
-ile Audius'ta bulunan bir eseri birebir eşlemek, eşleşen içeriğin aynı yayın ya da
-yasal olarak oynatılabilir olduğunu garanti etmez. Spotify Free veya Premium
-hesaplarının bütün Spotify kataloğunu doğrudan bu APK'da dinleyebildiği iddia edilmez.
+Spotify also prohibits unauthorized Spotify core-app clones and integration
+with other services under its [Developer Policy](https://developer.spotify.com/policy).
+Permission from Spotify may be necessary for broader deployment of the
+metadata matching and multi-source use cases.
+
+## Build an APK
+
+CI compiles Rust JNI shared libraries for arm64-v8a, armeabi-v7a and x86_64,
+runs Rust tests and Kotlin unit tests, then builds `app-debug.apk`.
+
+Check [GitHub Actions](../../actions) and select a successful
+**Build Resonance Android APK** or **Build Hybrid Resonance Android v0.5**
+run. Download its artifact ZIP and extract `app-debug.apk`.
+
+Debug builds are not production-signed Google Play releases. Compilation success
+does not establish real-device audio/DRM/OAuth success.

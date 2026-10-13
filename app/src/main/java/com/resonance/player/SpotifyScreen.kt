@@ -26,7 +26,21 @@ private val surface = Color(0xFF19221B)
 private data class SpotifyRow(val name: String, val sub: String, val uri: String, val detail: String = "")
 
 @Composable
-fun SpotifyScreen(activity: Activity) {
+fun SpotifyScreen(
+    activity: Activity,
+    onExternalPlay: (ExternalPlaylistItem) -> Unit = {},
+    onPremiumPlay: (SpotifyTrack) -> Unit = {}
+) {
+    var showHybrid by remember { mutableStateOf(true) }
+    if (showHybrid) {
+        Column(Modifier.fillMaxSize()) {
+            TextButton(onClick = { showHybrid = false }) {
+                Text("Spotify Connect kontrolleri (aktif Spotify cihazı gerektirir)")
+            }
+            HybridSpotifyPlaylists(activity, onExternalPlay, onPremiumPlay, Modifier.weight(1f))
+        }
+        return
+    }
     val client = remember { SpotifyClient(activity) }
     var id by remember { mutableStateOf(client.clientId) }
     var connected by remember { mutableStateOf(client.authorized) }
@@ -85,7 +99,8 @@ fun SpotifyScreen(activity: Activity) {
         }
     }
     Column(Modifier.fillMaxSize().background(dark).padding(18.dp)) {
-        Text("SPOTIFY CONNECT", color = accent, fontWeight = FontWeight.Black)
+        TextButton(onClick = { showHybrid = true }) { Text("← Spotify listelerim") }
+        Text("SPOTIFY CONNECT · HARİCİ OYNATICI KONTROLÜ", color = accent, fontWeight = FontWeight.Black)
         Spacer(Modifier.height(12.dp))
         if (!connected) {
             Text("Spotify Developer Dashboard'dan Client ID al ve aşağıya gir.", color = Color.White)
